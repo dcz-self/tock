@@ -31,7 +31,7 @@
 //!    hil::flash
 
 use core::cell::Cell;
-use kernel::hil::flash::{self, Flash};
+use kernel::hil::flash::{self, LegacyFlash};
 use kernel::hil::hasher::{self, Hasher};
 use kernel::hil::kv_system::{self, KVSystem};
 use kernel::utilities::cells::{OptionalCell, TakeCell};
@@ -49,13 +49,13 @@ enum Operation {
     GarbageCollect,
 }
 
-pub struct TickFSFlastCtrl<'a, F: Flash + 'static> {
+pub struct TickFSFlastCtrl<'a, F: LegacyFlash + 'static> {
     flash: &'a F,
     flash_read_buffer: TakeCell<'static, F::Page>,
     region_offset: usize,
 }
 
-impl<'a, F: Flash> TickFSFlastCtrl<'a, F> {
+impl<'a, F: LegacyFlash> TickFSFlastCtrl<'a, F> {
     pub fn new(
         flash: &'a F,
         flash_read_buffer: &'static mut F::Page,
@@ -69,7 +69,7 @@ impl<'a, F: Flash> TickFSFlastCtrl<'a, F> {
     }
 }
 
-impl<'a, F: Flash> tickv::flash_controller::FlashController<64> for TickFSFlastCtrl<'a, F> {
+impl<'a, F: LegacyFlash> tickv::flash_controller::FlashController<64> for TickFSFlastCtrl<'a, F> {
     fn read_region(
         &self,
         region_number: usize,
@@ -117,7 +117,7 @@ impl<'a, F: Flash> tickv::flash_controller::FlashController<64> for TickFSFlastC
 
 pub type TicKVKeyType = [u8; 8];
 
-pub struct TicKVStore<'a, F: Flash + 'static, H: Hasher<'a, 8>> {
+pub struct TicKVStore<'a, F: LegacyFlash + 'static, H: Hasher<'a, 8>> {
     tickv: AsyncTicKV<'a, TickFSFlastCtrl<'a, F>, 64>,
     hasher: &'a H,
     operation: Cell<Operation>,
@@ -132,7 +132,7 @@ pub struct TicKVStore<'a, F: Flash + 'static, H: Hasher<'a, 8>> {
     client: OptionalCell<&'a dyn kv_system::Client<TicKVKeyType>>,
 }
 
-impl<'a, F: Flash, H: Hasher<'a, 8>> TicKVStore<'a, F, H> {
+impl<'a, F: LegacyFlash, H: Hasher<'a, 8>> TicKVStore<'a, F, H> {
     pub fn new(
         flash: &'a F,
         hasher: &'a H,
@@ -219,7 +219,7 @@ impl<'a, F: Flash, H: Hasher<'a, 8>> TicKVStore<'a, F, H> {
     }
 }
 
-impl<'a, F: Flash, H: Hasher<'a, 8>> hasher::Client<'a, 8> for TicKVStore<'a, F, H> {
+impl<'a, F: LegacyFlash, H: Hasher<'a, 8>> hasher::Client<'a, 8> for TicKVStore<'a, F, H> {
     fn add_data_done(&'a self, _result: Result<(), ErrorCode>, data: &'static mut [u8]) {
         self.unhashed_key_buf.replace(data);
 
@@ -370,7 +370,7 @@ impl<'a, F: Flash, H: Hasher<'a, 8>> flash::Client<F> for TicKVStore<'a, F, H> {
     }
 }
 
-impl<'a, F: Flash, H: Hasher<'a, 8>> KVSystem<'a> for TicKVStore<'a, F, H> {
+impl<'a, F: LegacyFlash, H: Hasher<'a, 8>> KVSystem<'a> for TicKVStore<'a, F, H> {
     type K = TicKVKeyType;
 
     fn set_client(&self, client: &'a dyn kv_system::Client<Self::K>) {
