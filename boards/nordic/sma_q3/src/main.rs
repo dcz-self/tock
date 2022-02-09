@@ -1,7 +1,7 @@
-//! Tock kernel for the Nordic Semiconductor nRF52840 dongle.
+//! Tock kernel for the SMA Q3 smartwatch.
 //!
 //! It is based on nRF52840 SoC (Cortex M4 core with a BLE transceiver) with
-//! many exported I/O and peripherals.
+//! SWD as I/O and many peripherals.
 
 #![no_std]
 // Disable this attribute when documenting, as a workaround for
@@ -24,16 +24,17 @@ use nrf52840::gpio::Pin;
 use nrf52840::interrupt_service::Nrf52840DefaultPeripherals;
 use nrf52_components::{self, UartChannel, UartPins};
 
-// The nRF52840 Dongle LEDs
-const LED1_PIN: Pin = Pin::P0_06;
-const LED2_R_PIN: Pin = Pin::P0_08;
-const LED2_G_PIN: Pin = Pin::P1_09;
-const LED2_B_PIN: Pin = Pin::P0_12;
+// The backlight LED
+const LED1_PIN: Pin = Pin::P0_08;
 
-// The nRF52840 Dongle button
-const BUTTON_PIN: Pin = Pin::P1_06;
-const BUTTON_RST_PIN: Pin = Pin::P0_18;
+// Vibration motor
+const VIBRA1_PIN: Pin = Pin::P0_19;
 
+// The side button
+const BUTTON_PIN: Pin = Pin::P0_17;
+
+// There's no UART, but let's keep it for ease of adjusting.
+// Might be needed for GPS later.
 const UART_RTS: Option<Pin> = Some(Pin::P0_13);
 const UART_TXD: Pin = Pin::P0_15;
 const UART_CTS: Option<Pin> = Some(Pin::P0_17);
@@ -90,7 +91,7 @@ pub struct Platform {
     led: &'static capsules::led::LedDriver<
         'static,
         LedLow<'static, nrf52840::gpio::GPIOPin<'static>>,
-        4,
+        2,
     >,
     rng: &'static capsules::rng::RngDriver<'static>,
     temp: &'static capsules::temperature::TemperatureSensor<'static>,
@@ -244,9 +245,7 @@ pub unsafe fn main() {
     let led = components::led::LedsComponent::new().finalize(components::led_component_helper!(
         LedLow<'static, nrf52840::gpio::GPIOPin>,
         LedLow::new(&nrf52840_peripherals.gpio_port[LED1_PIN]),
-        LedLow::new(&nrf52840_peripherals.gpio_port[LED2_R_PIN]),
-        LedLow::new(&nrf52840_peripherals.gpio_port[LED2_G_PIN]),
-        LedLow::new(&nrf52840_peripherals.gpio_port[LED2_B_PIN]),
+        LedLow::new(&nrf52840_peripherals.gpio_port[VIBRA1_PIN]),
     ));
 
     let chip = static_init!(
@@ -255,6 +254,7 @@ pub unsafe fn main() {
     );
     CHIP = Some(chip);
 
+/*
     nrf52_components::startup::NrfStartupComponent::new(
         false,
         BUTTON_RST_PIN,
@@ -262,7 +262,7 @@ pub unsafe fn main() {
         &base_peripherals.nvmc,
     )
     .finalize(());
-
+*/
     // Create capabilities that the board needs to call certain protected kernel
     // functions.
     let process_management_capability =
@@ -274,9 +274,9 @@ pub unsafe fn main() {
 
     // Configure kernel debug gpios as early as possible
     kernel::debug::assign_gpios(
-        Some(&gpio_port[LED2_R_PIN]),
-        Some(&gpio_port[LED2_G_PIN]),
-        Some(&gpio_port[LED2_B_PIN]),
+        Some(&gpio_port[LED1_PIN]),
+        None,
+        None,
     );
 
     let rtc = &base_peripherals.rtc;
