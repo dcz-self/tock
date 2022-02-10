@@ -247,7 +247,6 @@ pub unsafe fn main() {
     );
     CHIP = Some(chip);
 
-/*
     nrf52_components::startup::NrfStartupComponent::new(
         false,
         BUTTON_RST_PIN,
@@ -255,7 +254,7 @@ pub unsafe fn main() {
         &base_peripherals.nvmc,
     )
     .finalize(());
-*/
+
     // Create capabilities that the board needs to call certain protected kernel
     // functions.
     let process_management_capability =
