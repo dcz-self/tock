@@ -4,18 +4,31 @@ use cortexm4;
 use kernel::debug;
 use kernel::debug::IoWrite;
 use kernel::hil::led;
-use kernel::hil::uart::{self, Configure};
 use nrf52840::gpio::Pin;
 
 use crate::CHIP;
 use crate::PROCESSES;
 use crate::PROCESS_PRINTER;
 
-struct Writer {
-    initialized: bool,
+enum Writer {
+    Uninitialized,
+    WriterRtt(&'static capsules::segger_rtt::SeggerRttMemory<'static>),
 }
 
-static mut WRITER: Writer = Writer { initialized: false };
+static mut WRITER: Writer = Writer::Uninitialized;
+
+fn wait() {
+    for _ in 0..100 {
+        cortexm4::support::nop();
+    }
+}
+
+/// Set the RTT memory buffer used to output panic messages.
+pub unsafe fn set_rtt_memory(
+    rtt_memory: &'static mut capsules::segger_rtt::SeggerRttMemory<'static>,
+) {
+    WRITER = Writer::WriterRtt(rtt_memory);
+}
 
 impl Write for Writer {
     fn write_str(&mut self, s: &str) -> ::core::fmt::Result {
@@ -26,26 +39,28 @@ impl Write for Writer {
 
 impl IoWrite for Writer {
     fn write(&mut self, buf: &[u8]) {
-        // Here, we create a second instance of the Uarte struct.
-        // This is okay because we only call this during a panic, and
-        // we will never actually process the interrupts
-        let uart = nrf52840::uart::Uarte::new();
-        if !self.initialized {
-            self.initialized = true;
-            let _ = uart.configure(uart::Parameters {
-                baud_rate: 115200,
-                stop_bits: uart::StopBits::One,
-                parity: uart::Parity::None,
-                hw_flow_control: false,
-                width: uart::Width::Eight,
-            });
-        }
-        for &c in buf {
-            unsafe {
-                uart.send_byte(c);
+        match self {
+            Writer::Uninitialized => {},
+            Writer::WriterRtt(rtt_memory) => {
+                let up_buffer = unsafe { &*rtt_memory.get_up_buffer_ptr() };
+                let buffer_len = up_buffer.length.get();
+                let buffer = unsafe {
+                    core::slice::from_raw_parts_mut(
+                        up_buffer.buffer.get() as *mut u8,
+                        buffer_len as usize,
+                    )
+                };
+
+                let mut write_position = up_buffer.write_position.get();
+
+                for &c in buf {
+                    buffer[write_position as usize] = c;
+                    write_position = (write_position + 1) % buffer_len;
+                    up_buffer.write_position.set(write_position);
+                    wait();
+                }
             }
-            while !uart.tx_ready() {}
-        }
+        };
     }
 }
 
@@ -54,8 +69,8 @@ impl IoWrite for Writer {
 #[panic_handler]
 /// Panic handler
 pub unsafe extern "C" fn panic_fmt(pi: &PanicInfo) -> ! {
-    // The nRF52840 Dongle LEDs (see back of board)
-    let led_kernel_pin = &nrf52840::gpio::GPIOPin::new(Pin::P0_06);
+    // The nRF52840DK LEDs (see back of board)
+    let led_kernel_pin = &nrf52840::gpio::GPIOPin::new(Pin::P0_13);
     let led = &mut led::LedLow::new(led_kernel_pin);
     let writer = &mut WRITER;
     debug::panic(

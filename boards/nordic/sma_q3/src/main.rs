@@ -22,7 +22,7 @@ use kernel::scheduler::round_robin::RoundRobinSched;
 use kernel::{capabilities, create_capability, debug, debug_gpio, debug_verbose, static_init};
 use nrf52840::gpio::Pin;
 use nrf52840::interrupt_service::Nrf52840DefaultPeripherals;
-use nrf52_components::{self, UartChannel, UartPins};
+use nrf52_components::{self, UartChannel};
 
 // The backlight LED
 const LED1_PIN: Pin = Pin::P0_08;
@@ -32,13 +32,6 @@ const VIBRA1_PIN: Pin = Pin::P0_19;
 
 // The side button
 const BUTTON_PIN: Pin = Pin::P0_17;
-
-// There's no UART, but let's keep it for ease of adjusting.
-// Might be needed for GPS later.
-const UART_RTS: Option<Pin> = Some(Pin::P0_13);
-const UART_TXD: Pin = Pin::P0_15;
-const UART_CTS: Option<Pin> = Some(Pin::P0_17);
-const UART_RXD: Pin = Pin::P0_20;
 
 // SPI pins not currently in use, but left here for convenience
 const _SPI_MOSI: Pin = Pin::P1_01;
@@ -289,7 +282,18 @@ pub unsafe fn main() {
         mux_alarm,
     )
     .finalize(components::alarm_component_helper!(nrf52840::rtc::Rtc));
-    let uart_channel = UartChannel::Pins(UartPins::new(UART_RTS, UART_TXD, UART_CTS, UART_RXD));
+    // Initialize early so any panic beyond this point can use the RTT memory object.
+    let uart_channel = {
+        let mut rtt_memory_refs =
+            components::segger_rtt::SeggerRttMemoryComponent::new().finalize(());
+
+        // XXX: This is inherently unsafe as it aliases the mutable reference to rtt_memory. This
+        // aliases reference is only used inside a panic handler, which should be OK, but maybe we
+        // should use a const reference to rtt_memory and leverage interior mutability instead.
+        self::io::set_rtt_memory(&mut *rtt_memory_refs.get_rtt_memory_ptr());
+
+        UartChannel::Rtt(rtt_memory_refs)
+    };
     let channel = nrf52_components::UartChannelComponent::new(
         uart_channel,
         mux_alarm,
