@@ -74,7 +74,7 @@ pub struct Platform {
     search: &'static search::Search<
         'static,
         VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>,
-        &'static LedDriver<'static, LedHigh<'static, GPIOPin<'static>>, 2>,
+        &'static LedDriver<'static, LedHigh<'static, GPIOPin<'static>>, 48>,
     >,
     ble_radio: &'static capsules::ble_advertising_driver::BLE<
         'static,
@@ -93,7 +93,7 @@ pub struct Platform {
     led: &'static capsules::led::LedDriver<
         'static,
         LedHigh<'static, nrf52840::gpio::GPIOPin<'static>>,
-        2,
+        48,
     >,
     rng: &'static capsules::rng::RngDriver<'static>,
     temp: &'static capsules::temperature::TemperatureSensor<'static>,
@@ -259,8 +259,57 @@ pub unsafe fn main() {
 
     let led = components::led::LedsComponent::new().finalize(components::led_component_helper!(
         LedHigh<'static, nrf52840::gpio::GPIOPin>,
-        LedHigh::new(&nrf52840_peripherals.gpio_port[LED1_PIN]),
-        LedHigh::new(&nrf52840_peripherals.gpio_port[VIBRA1_PIN]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P0_00]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P0_01]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P0_02]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P0_03]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P0_04]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P0_05]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P0_06]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P0_07]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P0_08]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P0_09]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P0_10]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P0_11]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P0_12]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P0_13]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P0_14]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P0_15]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P0_16]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P0_17]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P0_18]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P0_19]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P0_20]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P0_21]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P0_22]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P0_23]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P0_24]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P0_25]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P0_26]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P0_27]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P0_28]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P0_29]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P0_30]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P0_31]),
+
+
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P1_00]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P1_01]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P1_02]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P1_03]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P1_04]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P1_05]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P1_06]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P1_07]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P1_08]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P1_09]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P1_10]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P1_11]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P1_12]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P1_13]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P1_14]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[Pin::P1_15]),
+        //LedHigh::new(&nrf52840_peripherals.gpio_port[VIBRA1_PIN]),
     ));
 
     let chip = static_init!(
@@ -432,7 +481,7 @@ pub unsafe fn main() {
     search_virtual_alarm.setup();
     use kernel::hil::time::Alarm;
     let search = static_init!(
-        search::Search<'static, VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>, &'static LedDriver<'static, LedHigh<'static, GPIOPin<'static>>, 2>>,
+        search::Search<'static, VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>, &'static LedDriver<'static, LedHigh<'static, GPIOPin<'static>>, 48>>,
         search::Search::new(search_virtual_alarm, led),
     );
     

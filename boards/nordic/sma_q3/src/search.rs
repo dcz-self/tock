@@ -28,7 +28,7 @@ impl<'a, A: hil::time::Alarm<'a>, L> Search<'a, A, L> {
     }
 
     pub fn start(&self) {
-        let delay = self.alarm.ticks_from_ms(1500);
+        let delay = self.alarm.ticks_from_ms(1000);
         self.alarm.set_alarm(self.alarm.now(), delay);
     }
 }
