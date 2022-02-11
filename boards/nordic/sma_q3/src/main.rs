@@ -44,6 +44,7 @@ const PAN_ID: u16 = 0xABCD;
 
 /// UART Writer
 pub mod io;
+mod search;
 
 // State for loading and holding applications.
 // How should the kernel respond when a process faults.
@@ -67,6 +68,10 @@ pub static mut STACK_MEMORY: [u8; 0x1000] = [0; 0x1000];
 
 /// Supported drivers by the platform
 pub struct Platform {
+    search: &'static search::Search<
+        'static,
+        VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>,
+    >,
     ble_radio: &'static capsules::ble_advertising_driver::BLE<
         'static,
         nrf52840::ble_radio::Radio<'static>,
@@ -235,6 +240,19 @@ pub unsafe fn main() {
     )
     .finalize(components::button_component_buf!(nrf52840::gpio::GPIOPin));
 
+/*
+    let led_pins = static_init!(
+        [(&'static nrf52840::gpio::GPIOPin, kernel::hil::gpio::ActivationMode); 2],
+        [(&nrf52840::gpio::PA[13], kernel::hil::gpio::ActivationMode::ActiveLow),   // Red
+         (&nrf52840::gpio::PA[15], kernel::hil::gpio::ActivationMode::ActiveLow),   // Green
+         (&sam4l::gpio::PA[14], kernel::hil::gpio::ActivationMode::ActiveLow)
+        ]); // Blue
+    let led = static_init!(
+        capsules::led::LedDriver<'static, nrf52840::gpio::GPIOPin, 2>,
+        capsules::led::LedDriver::new(led_pins),
+    );
+    */
+
     let led = components::led::LedsComponent::new().finalize(components::led_component_helper!(
         LedHigh<'static, nrf52840::gpio::GPIOPin>,
         LedHigh::new(&nrf52840_peripherals.gpio_port[LED1_PIN]),
@@ -402,7 +420,23 @@ pub unsafe fn main() {
     let scheduler = components::sched::round_robin::RoundRobinComponent::new(&PROCESSES)
         .finalize(components::rr_component_helper!(NUM_PROCS));
 
+        
+    let search_virtual_alarm = static_init!(
+        capsules::virtual_alarm::VirtualMuxAlarm<'static, nrf52840::rtc::Rtc>,
+        capsules::virtual_alarm::VirtualMuxAlarm::new(mux_alarm)
+    );
+    search_virtual_alarm.setup();
+    use kernel::hil::time::Alarm;
+    let search = static_init!(
+        search::Search<'static, VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>>,
+        search::Search::new(search_virtual_alarm),
+    );
+    
+    search_virtual_alarm.set_alarm_client(search);
+    search.start();
+
     let platform = Platform {
+        search,
         button,
         ble_radio,
         ieee802154_radio,
