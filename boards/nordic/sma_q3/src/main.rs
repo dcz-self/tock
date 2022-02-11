@@ -13,7 +13,7 @@ use capsules::virtual_aes_ccm::MuxAES128CCM;
 use capsules::virtual_alarm::VirtualMuxAlarm;
 use kernel::component::Component;
 use kernel::dynamic_deferred_call::{DynamicDeferredCall, DynamicDeferredCallClientState};
-use kernel::hil::led::LedLow;
+use kernel::hil::led::LedHigh;
 use kernel::hil::symmetric_encryption::AES128;
 use kernel::hil::time::Counter;
 use kernel::platform::{KernelResources, SyscallDriverLookup};
@@ -83,7 +83,7 @@ pub struct Platform {
     gpio: &'static capsules::gpio::GPIO<'static, nrf52840::gpio::GPIOPin<'static>>,
     led: &'static capsules::led::LedDriver<
         'static,
-        LedLow<'static, nrf52840::gpio::GPIOPin<'static>>,
+        LedHigh<'static, nrf52840::gpio::GPIOPin<'static>>,
         2,
     >,
     rng: &'static capsules::rng::RngDriver<'static>,
@@ -236,9 +236,9 @@ pub unsafe fn main() {
     .finalize(components::button_component_buf!(nrf52840::gpio::GPIOPin));
 
     let led = components::led::LedsComponent::new().finalize(components::led_component_helper!(
-        LedLow<'static, nrf52840::gpio::GPIOPin>,
-        LedLow::new(&nrf52840_peripherals.gpio_port[LED1_PIN]),
-        LedLow::new(&nrf52840_peripherals.gpio_port[VIBRA1_PIN]),
+        LedHigh<'static, nrf52840::gpio::GPIOPin>,
+        LedHigh::new(&nrf52840_peripherals.gpio_port[LED1_PIN]),
+        LedHigh::new(&nrf52840_peripherals.gpio_port[VIBRA1_PIN]),
     ));
 
     let chip = static_init!(
@@ -249,7 +249,7 @@ pub unsafe fn main() {
 
     nrf52_components::startup::NrfStartupComponent::new(
         false,
-        BUTTON_RST_PIN,
+        BUTTON_PIN,
         nrf52840::uicr::Regulator0Output::V3_0,
         &base_peripherals.nvmc,
     )
