@@ -66,11 +66,15 @@ static mut PROCESS_PRINTER: Option<&'static kernel::process::ProcessPrinterText>
 #[link_section = ".stack_buffer"]
 pub static mut STACK_MEMORY: [u8; 0x1000] = [0; 0x1000];
 
+use capsules::led::LedDriver;
+use nrf52840::gpio::GPIOPin;
+
 /// Supported drivers by the platform
 pub struct Platform {
     search: &'static search::Search<
         'static,
         VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>,
+        &'static LedDriver<'static, LedHigh<'static, GPIOPin<'static>>, 2>,
     >,
     ble_radio: &'static capsules::ble_advertising_driver::BLE<
         'static,
@@ -428,8 +432,8 @@ pub unsafe fn main() {
     search_virtual_alarm.setup();
     use kernel::hil::time::Alarm;
     let search = static_init!(
-        search::Search<'static, VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>>,
-        search::Search::new(search_virtual_alarm),
+        search::Search<'static, VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>, &'static LedDriver<'static, LedHigh<'static, GPIOPin<'static>>, 2>>,
+        search::Search::new(search_virtual_alarm, led),
     );
     
     search_virtual_alarm.set_alarm_client(search);
