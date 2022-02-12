@@ -25,6 +25,7 @@ use nrf52840::interrupt_service::Nrf52840DefaultPeripherals;
 use nrf52_components::{self, UartChannel};
 
 mod bmp280;
+mod c_bmp280;
 
 // The backlight LED
 const LED1_PIN: Pin = Pin::P0_08;

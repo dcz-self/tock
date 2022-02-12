@@ -1,6 +1,10 @@
-//! hil driver for BMP280 Temperature and Pressure Sensor
+//! hil driver for Bmp280 Temperature and Pressure Sensor
+//!
+//! Based off the SHT3x code.
 //!
 //! Not implemented: pressure
+//!
+//! TODO: convert to calibrated, check status, sleep before checking status
 
 use core::cell::Cell;
 use kernel::debug;
@@ -72,6 +76,8 @@ impl CalibrationData {
     }
 }
 
+/// Internal state.
+/// Each state can lead to the next on in order of appearance.
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum State {
     Uninitialized,
@@ -79,25 +85,31 @@ enum State {
     InitReadingCalibration,
     Idle(CalibrationData),
     /// A request is in flight, but has not been returned to userspace yet.
+    /// This state can also lead back to Idle.
     Reading(CalibrationData),
 }
 
-pub struct BMP280<'a, A: Alarm<'a>> {
+pub struct Bmp280<'a, A: Alarm<'a>> {
     i2c: &'a dyn i2c::I2CDevice,
     temperature_client: OptionalCell<&'a dyn kernel::hil::sensors::TemperatureClient>,
+    // This might be better as a `RefCell`,
+    // because `State` is multiple bytes due to the `CalibrationData`.
+    // `Cell` requires Copy, which might get expensive, while `RefCell` doesn't.
+    // It's probably not a good idea to split `CalibrationData`
+    // into a separate place, because it will make state more duplicated.
     state: Cell<State>,
-    // Stores i2c commands
+    /// Stores i2c commands
     buffer: TakeCell<'static, [u8]>,
     alarm: &'a A,
 }
 
-impl<'a, A: Alarm<'a>> BMP280<'a, A> {
+impl<'a, A: Alarm<'a>> Bmp280<'a, A> {
     pub fn new(
         i2c: &'a dyn i2c::I2CDevice,
         buffer: &'static mut [u8],
         alarm: &'a A,
     ) -> Self {
-        BMP280 {
+        Self {
             i2c: i2c,
             temperature_client: OptionalCell::empty(),
             state: Cell::new(State::Uninitialized),
@@ -155,7 +167,7 @@ impl<'a, A: Alarm<'a>> BMP280<'a, A> {
     }
 }
 
-impl<'a, A: Alarm<'a>> i2c::I2CClient for BMP280<'a, A> {
+impl<'a, A: Alarm<'a>> i2c::I2CClient for Bmp280<'a, A> {
     fn command_complete(&self, buffer: &'static mut [u8], status: Result<(), i2c::Error>) {
         match status {
             Ok(()) => {
@@ -178,7 +190,7 @@ impl<'a, A: Alarm<'a>> i2c::I2CClient for BMP280<'a, A> {
                         (State::Idle(calibration), Some(calibration.temp_from_raw(raw_temp)))
                     },
                     other => {
-                        debug!("MP280 received i2c reply in state {:?}", other);
+                        debug!("BMP280 received i2c reply in state {:?}", other);
                         (other, None)
                     },
                 };
@@ -202,7 +214,7 @@ impl<'a, A: Alarm<'a>> i2c::I2CClient for BMP280<'a, A> {
     }
 }
 
-impl<'a, A: Alarm<'a>> kernel::hil::sensors::TemperatureDriver<'a> for BMP280<'a, A> {
+impl<'a, A: Alarm<'a>> kernel::hil::sensors::TemperatureDriver<'a> for Bmp280<'a, A> {
     fn set_client(&self, client: &'a dyn kernel::hil::sensors::TemperatureClient) {
         self.temperature_client.set(client);
     }
