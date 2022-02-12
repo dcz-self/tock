@@ -11,16 +11,26 @@ use kernel::ErrorCode;
 
 pub static BASE_ADDR: u8 = 0x76;
 
+/// Currently includes temperature only
+const CALIBRATION_BYTES: u8 = 6;
+
+#[allow(non_camel_case_types)]
+#[allow(dead_code)]
 enum Registers {
-    Id = 0xd0,
-    Reset = 0xe0,
+    /// First register of calibration data.
+    /// Each register is 2 bytes long.
+    DIG_T1 = 0x88,
+    DIG_T2 = 0x8a,
+    DIG_T3 = 0x8c,
+    ID = 0xd0,
+    RESET = 0xe0,
     /// measuring: [3]
     /// im_update: [0]
-    Status = 0xf3,
+    STATUS = 0xf3,
     /// osrs_t: [7:5]
     /// osrs_p: [4:2]
     /// mode: [1:0]
-    CtrlMeas = 0xf4,
+    CTRL_MEAS = 0xf4,
     /// t_sb: [7:5]
     /// filter: [4:2]
     /// spi3w_en: [0]
@@ -36,12 +46,40 @@ enum Registers {
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
+struct CalibrationData {
+    dig_t1: u16,
+    dig_t2: i16,
+    dig_t3: i16,
+    // TODO: pressure calibration
+}
+
+fn twobyte(msb: u8, lsb: u8) -> u16 {
+    ((msb as u16) << 8) + lsb as u16
+}
+
+impl CalibrationData {
+    fn new(i2c_raw: &[u8]) -> Self {
+        CalibrationData {
+            dig_t1: twobyte(i2c_raw[0], i2c_raw[1]) as u16,
+            dig_t2: twobyte(i2c_raw[2], i2c_raw[3]) as i16,
+            dig_t3: twobyte(i2c_raw[4], i2c_raw[5]) as i16,
+        }
+    }
+    
+    fn temp_from_raw(&self, raw_temp: usize) -> usize {
+    // FIXME
+        raw_temp
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
 enum State {
     Uninitialized,
-    Initializing,
-    Idle,
+    InitConfiguring,
+    InitReadingCalibration,
+    Idle(CalibrationData),
     /// A request is in flight, but has not been returned to userspace yet.
-    Reading,
+    Reading(CalibrationData),
 }
 
 pub struct BMP280<'a, A: Alarm<'a>> {
@@ -62,7 +100,7 @@ impl<'a, A: Alarm<'a>> BMP280<'a, A> {
         BMP280 {
             i2c: i2c,
             temperature_client: OptionalCell::empty(),
-            state: Cell::new(State::Idle),
+            state: Cell::new(State::Uninitialized),
             buffer: TakeCell::new(buffer),
             alarm: alarm,
         }
@@ -73,27 +111,23 @@ impl<'a, A: Alarm<'a>> BMP280<'a, A> {
         match self.state.get() {
             // Actually, the sensor might be on, just in default state.
             Uninitialized => Err(ErrorCode::OFF),
-            Initializing => Err(ErrorCode::BUSY),
-            Reading => Err(ErrorCode::BUSY),
-            Idle => self.read_temp_data(),
+            InitConfiguring | InitReadingCalibration => Err(ErrorCode::BUSY),
+            Idle(calibration) => self.buffer.take().map_or_else(
+                || panic!("BMP280 No buffer available!"),
+                |buffer| {
+                    self.state.set(State::Reading(calibration));
+                    self.i2c.enable();
+
+                    buffer[0] = Registers::TEMP_MSB as u8;
+                    // why is explicit length needed here?
+                    // TODO: propagate errors
+                    self.i2c.read(buffer, 3).unwrap();
+
+                    Ok(())
+                }
+            ),
+            Reading(_calibration) => Err(ErrorCode::BUSY),
         }
-    }
-
-    fn read_temp_data(&self) -> Result<(), ErrorCode> {
-        self.buffer.take().map_or_else(
-            || panic!("BMP280 No buffer available!"),
-            |buffer| {
-                self.state.set(State::Reading);
-                self.i2c.enable();
-
-                buffer[0] = Registers::TEMP_MSB as u8;
-                // why is explicit length needed here?
-                // TODO: propagate errors
-                self.i2c.read(buffer, 3).unwrap();
-
-                Ok(())
-            },
-        )
     }
     
     pub fn begin_initialize(&self) -> Result<(), ErrorCode> {
@@ -102,10 +136,10 @@ impl<'a, A: Alarm<'a>> BMP280<'a, A> {
             |buffer| {
                 match self.state.get() {
                     State::Uninitialized => {
-                        self.state.set(State::Initializing);
+                        self.state.set(State::InitConfiguring);
                         self.i2c.enable();
 
-                        buffer[0] = Registers::CtrlMeas as u8;
+                        buffer[0] = Registers::CTRL_MEAS as u8;
                         // todo: use bitfield crate
                         buffer[1] = 0b00100001;
 
@@ -126,20 +160,29 @@ impl<'a, A: Alarm<'a>> i2c::I2CClient for BMP280<'a, A> {
         match status {
             Ok(()) => {
                 let (new_state, temp) = match self.state.get() {
-                    State::Reading => {
+                    State::InitConfiguring => {
+                        self.buffer.take().map_or_else(
+                            || panic!("BMP280 No buffer available!"),
+                            |buffer| {
+                                buffer[0] = Registers::DIG_T1 as u8;
+                                self.i2c.write(buffer, CALIBRATION_BYTES).unwrap()
+                            }
+                        );
+                        (State::InitReadingCalibration, None)
+                    },
+                    State::InitReadingCalibration => (State::Idle(CalibrationData::new(buffer)), None),
+                    State::Reading(calibration) => {
                         let msb = buffer[0];
                         let lsb = buffer[1];
                         let raw_temp = ((msb as usize) << 8) + (lsb as usize);
-                        // TODO: calculate actual temperature
-                        (State::Idle, Some(raw_temp))
+                        (State::Idle(calibration), Some(calibration.temp_from_raw(raw_temp)))
                     },
-                    State::Initializing => (State::Idle, None),
                     other => {
                         debug!("MP280 received i2c reply in state {:?}", other);
                         (other, None)
                     },
                 };
-                if let State::Idle = new_state {
+                if let State::Idle(_) = new_state {
                     self.i2c.disable();
                 }
                 self.state.set(new_state);
