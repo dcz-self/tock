@@ -48,7 +48,7 @@ macro_rules! bmp280_component_helper {
         use crate::bmp280::Bmp280;
         use core::mem::MaybeUninit;
 
-        static mut BUFFER: [u8; 6] = [0; 6];
+        static mut BUFFER: [u8; bmp280::CALIBRATION_BYTES] = [0; bmp280::CALIBRATION_BYTES];
 
         static mut BMP280: MaybeUninit<Bmp280<'static, VirtualMuxAlarm<'static, $A>>> =
             MaybeUninit::uninit();

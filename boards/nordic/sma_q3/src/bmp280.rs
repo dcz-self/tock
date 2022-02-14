@@ -15,8 +15,9 @@ use kernel::ErrorCode;
 
 pub static BASE_ADDR: u8 = 0x76;
 
-/// Currently includes temperature only
-const CALIBRATION_BYTES: u8 = 6;
+/// Currently includes temperature only.
+/// This is the biggest buffer size in this module.
+pub const CALIBRATION_BYTES: usize = 6;
 
 #[allow(non_camel_case_types)]
 #[allow(dead_code)]
@@ -171,33 +172,33 @@ impl<'a, A: Alarm<'a>> i2c::I2CClient for Bmp280<'a, A> {
     fn command_complete(&self, buffer: &'static mut [u8], status: Result<(), i2c::Error>) {
         match status {
             Ok(()) => {
-                let (new_state, temp) = match self.state.get() {
+                debug!("i2c_reply: {:?}", self.state.get());
+                let (new_state, temp, buffer) = match self.state.get() {
                     State::InitConfiguring => {
-                        self.buffer.take().map_or_else(
-                            || panic!("BMP280 No buffer available!"),
-                            |buffer| {
-                                buffer[0] = Registers::DIG_T1 as u8;
-                                self.i2c.write(buffer, CALIBRATION_BYTES).unwrap()
-                            }
-                        );
-                        (State::InitReadingCalibration, None)
+                        buffer[0] = Registers::DIG_T1 as u8;
+                        self.i2c.write(buffer, CALIBRATION_BYTES as u8).unwrap();
+                        (State::InitReadingCalibration, None, None)
                     },
-                    State::InitReadingCalibration => (State::Idle(CalibrationData::new(buffer)), None),
+                    State::InitReadingCalibration => (State::Idle(CalibrationData::new(buffer)), None, Some(buffer)),
                     State::Reading(calibration) => {
                         let msb = buffer[0];
                         let lsb = buffer[1];
                         let raw_temp = ((msb as usize) << 8) + (lsb as usize);
-                        (State::Idle(calibration), Some(calibration.temp_from_raw(raw_temp)))
+                        (State::Idle(calibration), Some(calibration.temp_from_raw(raw_temp)), Some(buffer))
                     },
                     other => {
                         debug!("BMP280 received i2c reply in state {:?}", other);
-                        (other, None)
+                        (other, None, Some(buffer))
                     },
                 };
                 if let State::Idle(_) = new_state {
                     self.i2c.disable();
                 }
                 self.state.set(new_state);
+                if let Some(buffer) = buffer {
+                    self.buffer.replace(buffer);
+                }
+
                 if let Some(temp) = temp {
                     self.temperature_client
                         .map(|cb| cb.callback(temp));
@@ -211,6 +212,7 @@ impl<'a, A: Alarm<'a>> i2c::I2CClient for Bmp280<'a, A> {
                 self.temperature_client.map(|cb| cb.callback(usize::MAX));
             }
         }
+        debug!("i2c_reply finished: {:?}", self.state.get());
     }
 }
 
