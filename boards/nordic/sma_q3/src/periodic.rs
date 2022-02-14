@@ -9,6 +9,10 @@ enum Order {
     Finished(usize),
 }
 
+pub trait Callable {
+    fn next(&mut self);
+}
+
 
 pub struct Periodic<'a, A: hil::time::Alarm<'a>, F> {
     alarm: &'a A,
@@ -29,10 +33,10 @@ impl<'a, A: hil::time::Alarm<'a>, F> Periodic<'a, A, F> {
     }
 }
 
-impl<'a, A: hil::time::Alarm<'a>, F: FnMut()> hil::time::AlarmClient for Periodic<'a, A, F> {
+impl<'a, A: hil::time::Alarm<'a>, F: Callable> hil::time::AlarmClient for Periodic<'a, A, F> {
     fn alarm(&self) {
         self.arm();
         let mut f = self.f.borrow_mut();
-        (f)();
+        f.next();
     }
 }

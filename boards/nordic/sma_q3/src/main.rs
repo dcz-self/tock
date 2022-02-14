@@ -443,6 +443,29 @@ pub unsafe fn main() {
     let scheduler = components::sched::round_robin::RoundRobinComponent::new(&PROCESSES)
         .finalize(components::rr_component_helper!(NUM_PROCS));
 
+        
+    let periodic_virtual_alarm = static_init!(
+        capsules::virtual_alarm::VirtualMuxAlarm<'static, nrf52840::rtc::Rtc>,
+        capsules::virtual_alarm::VirtualMuxAlarm::new(mux_alarm)
+    );
+    periodic_virtual_alarm.setup();
+    use kernel::hil::time::Alarm;
+    
+    struct Print;
+    impl periodic::Callable for Print {
+        fn next(&mut self) {
+            debug!("yes");
+        }
+    }
+    
+    let periodic = static_init!(
+        periodic::Periodic<'static, VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>, Print>,
+        periodic::Periodic::new(periodic_virtual_alarm, Print),
+    );
+    
+    periodic_virtual_alarm.set_alarm_client(periodic);
+    periodic.arm();
+
     let platform = Platform {
         temperature,
         button,
