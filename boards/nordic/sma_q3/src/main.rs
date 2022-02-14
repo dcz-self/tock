@@ -451,16 +451,16 @@ pub unsafe fn main() {
     periodic_virtual_alarm.setup();
     use kernel::hil::time::Alarm;
     
-    struct Print;
+    struct Print(&'static bmp280::Bmp280<'static, VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>>);
     impl periodic::Callable for Print {
         fn next(&mut self) {
-            debug!("yes");
+            debug!("read request: {:?}", self.0.read_temperature());
         }
     }
     
     let periodic = static_init!(
         periodic::Periodic<'static, VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>, Print>,
-        periodic::Periodic::new(periodic_virtual_alarm, Print),
+        periodic::Periodic::new(periodic_virtual_alarm, Print(bmp280)),
     );
     
     periodic_virtual_alarm.set_alarm_client(periodic);

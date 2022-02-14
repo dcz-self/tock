@@ -86,6 +86,9 @@ enum State {
     InitReadingCalibration,
     Idle(CalibrationData),
     /// A request is in flight, but has not been returned to userspace yet.
+    /// Waiting for the readout to become ready.
+    Waiting(CalibrationData),
+    /// Waiting for data to return.
     /// This state can also lead back to Idle.
     Reading(CalibrationData),
 }
@@ -119,7 +122,7 @@ impl<'a, A: Alarm<'a>> Bmp280<'a, A> {
         }
     }
 
-    fn read_temperature(&self) -> Result<(), ErrorCode> {
+    pub fn read_temperature(&self) -> Result<(), ErrorCode> {
         use State::*;
         match self.state.get() {
             // Actually, the sensor might be on, just in default state.
@@ -128,18 +131,13 @@ impl<'a, A: Alarm<'a>> Bmp280<'a, A> {
             Idle(calibration) => self.buffer.take().map_or_else(
                 || panic!("BMP280 No buffer available!"),
                 |buffer| {
-                    self.state.set(State::Reading(calibration));
+                    self.state.set(State::Waiting(calibration));
                     self.i2c.enable();
-
-                    buffer[0] = Registers::TEMP_MSB as u8;
-                    // why is explicit length needed here?
-                    // TODO: propagate errors
-                    self.i2c.read(buffer, 3).unwrap();
-
+                    self.check_ready(buffer);
                     Ok(())
                 }
             ),
-            Reading(_calibration) => Err(ErrorCode::BUSY),
+            Reading(_calibration) | Waiting(_calibration) => Err(ErrorCode::BUSY),
         }
     }
     
@@ -166,6 +164,28 @@ impl<'a, A: Alarm<'a>> Bmp280<'a, A> {
             }
         )
     }
+    
+    fn i2c_write<const COUNT: u8>(self, buffer: &'static mut [u8], addr: u8, data: [u8, COUNT]) {
+        buffer[0] = addr;
+        for (i, d) in data.iter().enumerate() {
+            buffer[i + 1] = d;
+        }
+        self.i2c.write(buffer, COUNT + 1).unwrap();
+    }
+    
+    fn i2c_read<const COUNT: u8>(self, buffer: &'static mut [u8], addr: u8) {
+        buffer[0] = addr;
+        self.i2c.write(buffer, COUNT + 1).unwrap();
+    }
+
+    fn i2c_parse_read<const COUNT: u8>(buffer: &[u8]) -> &u8 {
+        &buffer[1..COUNT+1]
+    }
+
+    fn check_ready(&self, buffer: &'static mut [u8]) {
+        buffer[0] = Registers::STATUS as u8;
+        self.i2c.read(buffer, 2).unwrap();
+    }
 }
 
 impl<'a, A: Alarm<'a>> i2c::I2CClient for Bmp280<'a, A> {
@@ -176,13 +196,32 @@ impl<'a, A: Alarm<'a>> i2c::I2CClient for Bmp280<'a, A> {
                 let (new_state, temp, buffer) = match self.state.get() {
                     State::InitConfiguring => {
                         buffer[0] = Registers::DIG_T1 as u8;
-                        self.i2c.write(buffer, CALIBRATION_BYTES as u8).unwrap();
+                        self.i2c.read(buffer, CALIBRATION_BYTES as u8 + 1).unwrap();
                         (State::InitReadingCalibration, None, None)
                     },
-                    State::InitReadingCalibration => (State::Idle(CalibrationData::new(buffer)), None, Some(buffer)),
+                    State::InitReadingCalibration => (
+                        State::Idle(CalibrationData::new(&buffer[1..])),
+                        None,
+                        Some(buffer),
+                    ),
+                    State::Waiting(calibration) => {
+                    debug!("{:?}", buffer);
+                        // not ready yet
+                        if buffer[1] & 0b1000 == 0 {
+                            buffer[0] = Registers::TEMP_MSB as u8;
+                            // why is explicit length needed here?
+                            // TODO: propagate errors
+                            self.i2c.read(buffer, 4).unwrap();
+                            (State::Reading(calibration), None, None)
+                        } else {
+                            self.check_ready(buffer);
+                            (State::Waiting(calibration), None, None)
+                        }
+                    }
                     State::Reading(calibration) => {
-                        let msb = buffer[0];
-                        let lsb = buffer[1];
+                        debug!("{:?}", buffer);
+                        let msb = buffer[1];
+                        let lsb = buffer[2];
                         let raw_temp = ((msb as usize) << 8) + (lsb as usize);
                         (State::Idle(calibration), Some(calibration.temp_from_raw(raw_temp)), Some(buffer))
                     },
@@ -200,13 +239,12 @@ impl<'a, A: Alarm<'a>> i2c::I2CClient for Bmp280<'a, A> {
                 }
 
                 if let Some(temp) = temp {
+                    debug!("temp {}", temp);
                     self.temperature_client
                         .map(|cb| cb.callback(temp));
                 }
             }
             _ => {
-                // why does the buffer get replaced?
-                // where does this buffer come from?
                 self.buffer.replace(buffer);
                 self.i2c.disable();
                 self.temperature_client.map(|cb| cb.callback(usize::MAX));
