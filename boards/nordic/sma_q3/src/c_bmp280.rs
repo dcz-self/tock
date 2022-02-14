@@ -12,7 +12,7 @@
 //! let bmp280 = components::bmp280::Bmp280Component::new(sensors_i2c_bus, mux_alarm).finalize(
 //!         components::bmp280_component_helper!(nrf52::rtc::Rtc<'static>),
 //!     );
-//! bmp280.reset();
+//! bmp280.begin_initialize();
 //! ```
 //!
 //! With a specified i2c address
@@ -20,7 +20,7 @@
 //! let bmp280 = components::bmp280::Bmp280Component::new(sensors_i2c_bus, mux_alarm).finalize(
 //!         components::bmp280_component_helper!(nrf52::rtc::Rtc<'static>, capsules::bmp280::BASE_ADDR),
 //!     );
-//! bmp280.reset();
+//! bmp280.begin_initialize();
 //! ```
 
 use crate::bmp280::Bmp280;
@@ -46,15 +46,14 @@ macro_rules! bmp280_component_helper {
     // as some boards (like nrf52) require a shift
     ($A:ty, $address: expr) => {{
         use crate::bmp280::Bmp280;
-        use capsules::virtual_i2c::I2CDevice;
         use core::mem::MaybeUninit;
 
         static mut BUFFER: [u8; 6] = [0; 6];
 
-        static mut bmp280: MaybeUninit<Bmp280<'static, VirtualMuxAlarm<'static, $A>>> =
+        static mut BMP280: MaybeUninit<Bmp280<'static, VirtualMuxAlarm<'static, $A>>> =
             MaybeUninit::uninit();
-        static mut bmp280_alarm: MaybeUninit<VirtualMuxAlarm<'static, $A>> = MaybeUninit::uninit();
-        (&mut bmp280_alarm, &mut BUFFER, &mut bmp280, $address)
+        static mut BMP280_ALARM: MaybeUninit<VirtualMuxAlarm<'static, $A>> = MaybeUninit::uninit();
+        (&mut BMP280_ALARM, &mut BUFFER, &mut BMP280, $address)
     }};
 }
 

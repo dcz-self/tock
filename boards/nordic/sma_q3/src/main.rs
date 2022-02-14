@@ -13,6 +13,7 @@ use capsules::virtual_aes_ccm::MuxAES128CCM;
 use capsules::virtual_alarm::VirtualMuxAlarm;
 use kernel::component::Component;
 use kernel::dynamic_deferred_call::{DynamicDeferredCall, DynamicDeferredCallClientState};
+use kernel::hil::i2c::I2CMaster;
 use kernel::hil::led::LedHigh;
 use kernel::hil::symmetric_encryption::AES128;
 use kernel::hil::time::Counter;
@@ -40,6 +41,10 @@ const BUTTON_PIN: Pin = Pin::P0_17;
 const _SPI_MOSI: Pin = Pin::P1_01;
 const _SPI_MISO: Pin = Pin::P1_02;
 const _SPI_CLK: Pin = Pin::P1_04;
+
+/// I2C pins for the temp/pressure sensor
+const I2C_TEMP_SDA_PIN: Pin = Pin::P1_15;
+const I2C_TEMP_SCL_PIN: Pin = Pin::P0_02;
 
 // Constants related to the configuration of the 15.4 network stack
 const SRC_MAC: u16 = 0xf00f;
@@ -70,6 +75,7 @@ pub static mut STACK_MEMORY: [u8; 0x1000] = [0; 0x1000];
 
 /// Supported drivers by the platform
 pub struct Platform {
+    temperature: &'static capsules::temperature::TemperatureSensor<'static>,
     ble_radio: &'static capsules::ble_advertising_driver::BLE<
         'static,
         nrf52840::ble_radio::Radio<'static>,
@@ -90,7 +96,7 @@ pub struct Platform {
         2,
     >,
     rng: &'static capsules::rng::RngDriver<'static>,
-    temp: &'static capsules::temperature::TemperatureSensor<'static>,
+    //temp: &'static capsules::temperature::TemperatureSensor<'static>,
     ipc: kernel::ipc::IPC<NUM_PROCS>,
     analog_comparator: &'static capsules::analog_comparator::AnalogComparator<
         'static,
@@ -118,7 +124,7 @@ impl SyscallDriverLookup for Platform {
             capsules::rng::DRIVER_NUM => f(Some(self.rng)),
             capsules::ble_advertising_driver::DRIVER_NUM => f(Some(self.ble_radio)),
             capsules::ieee802154::DRIVER_NUM => f(Some(self.ieee802154_radio)),
-            capsules::temperature::DRIVER_NUM => f(Some(self.temp)),
+            capsules::temperature::DRIVER_NUM => f(Some(self.temperature)),
             capsules::analog_comparator::DRIVER_NUM => f(Some(self.analog_comparator)),
             kernel::ipc::DRIVER_NUM => f(Some(&self.ipc)),
             _ => f(None),
@@ -378,6 +384,37 @@ pub unsafe fn main() {
     )
     .finalize(());
 
+    let dynamic_deferred_call_clients =
+        static_init!([DynamicDeferredCallClientState; 5], Default::default());
+    let dynamic_deferred_caller = static_init!(
+        DynamicDeferredCall,
+        DynamicDeferredCall::new(dynamic_deferred_call_clients)
+    );
+    DynamicDeferredCall::set_global_instance(dynamic_deferred_caller);
+    
+    let sensors_i2c_bus = static_init!(
+        capsules::virtual_i2c::MuxI2C<'static>,
+        capsules::virtual_i2c::MuxI2C::new(&base_peripherals.twi1, None, dynamic_deferred_caller)
+    );
+    
+    base_peripherals.twi1.configure(
+        nrf52840::pinmux::Pinmux::new(I2C_TEMP_SCL_PIN as u32),
+        nrf52840::pinmux::Pinmux::new(I2C_TEMP_SDA_PIN as u32),
+    );
+    base_peripherals.twi1.set_master_client(sensors_i2c_bus);
+        
+    let bmp280 = c_bmp280::Bmp280Component::new(sensors_i2c_bus, mux_alarm).finalize(
+        bmp280_component_helper!(nrf52840::rtc::Rtc<'static>, bmp280::BASE_ADDR),
+    );
+    bmp280.begin_initialize().unwrap();
+
+    let temperature = components::temperature::TemperatureComponent::new(
+        board_kernel,
+        capsules::temperature::DRIVER_NUM,
+        bmp280,
+    )
+    .finalize(());
+    
     let rng = components::rng::RngComponent::new(
         board_kernel,
         capsules::rng::DRIVER_NUM,
@@ -406,6 +443,7 @@ pub unsafe fn main() {
         .finalize(components::rr_component_helper!(NUM_PROCS));
 
     let platform = Platform {
+        temperature,
         button,
         ble_radio,
         ieee802154_radio,
@@ -414,7 +452,7 @@ pub unsafe fn main() {
         led,
         gpio,
         rng,
-        temp,
+        //temp,
         alarm,
         analog_comparator,
         ipc: kernel::ipc::IPC::new(
