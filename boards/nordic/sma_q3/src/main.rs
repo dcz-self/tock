@@ -27,6 +27,7 @@ use nrf52_components::{self, UartChannel};
 
 mod bmp280;
 mod c_bmp280;
+mod periodic;
 
 // The backlight LED
 const LED1_PIN: Pin = Pin::P0_08;
