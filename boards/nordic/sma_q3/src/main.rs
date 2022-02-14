@@ -407,7 +407,6 @@ pub unsafe fn main() {
     let bmp280 = c_bmp280::Bmp280Component::new(sensors_i2c_bus, mux_alarm).finalize(
         bmp280_component_helper!(nrf52840::rtc::Rtc<'static>, bmp280::BASE_ADDR),
     );
-    bmp280.begin_initialize().unwrap();
 
     let temperature = components::temperature::TemperatureComponent::new(
         board_kernel,
@@ -465,7 +464,7 @@ pub unsafe fn main() {
     
     periodic_virtual_alarm.set_alarm_client(periodic);
     periodic.arm();
-
+    bmp280.begin_initialize().unwrap();
     let platform = Platform {
         temperature,
         button,

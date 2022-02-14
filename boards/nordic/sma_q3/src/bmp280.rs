@@ -21,7 +21,7 @@ pub const CALIBRATION_BYTES: usize = 6;
 
 #[allow(non_camel_case_types)]
 #[allow(dead_code)]
-enum Registers {
+enum Register {
     /// First register of calibration data.
     /// Each register is 2 bytes long.
     DIG_T1 = 0x88,
@@ -82,6 +82,7 @@ impl CalibrationData {
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum State {
     Uninitialized,
+    InitId,
     InitConfiguring,
     InitReadingCalibration,
     Idle(CalibrationData),
@@ -124,6 +125,7 @@ impl<'a, A: Alarm<'a>> Bmp280<'a, A> {
 
     pub fn read_temperature(&self) -> Result<(), ErrorCode> {
         use State::*;
+        debug!("read temp: {:?}", self.state.get());
         match self.state.get() {
             // Actually, the sensor might be on, just in default state.
             Uninitialized => Err(ErrorCode::OFF),
@@ -138,25 +140,29 @@ impl<'a, A: Alarm<'a>> Bmp280<'a, A> {
                 }
             ),
             Reading(_calibration) | Waiting(_calibration) => Err(ErrorCode::BUSY),
+            _ => Ok(()),
         }
     }
     
     pub fn begin_initialize(&self) -> Result<(), ErrorCode> {
+        debug!("init: {:?}", self.state.get());
         self.buffer.take().map_or_else(
             || panic!("BMP280 No buffer available!"),
             |buffer| {
                 match self.state.get() {
                     State::Uninitialized => {
-                        self.state.set(State::InitConfiguring);
                         self.i2c.enable();
-
-                        buffer[0] = Registers::CTRL_MEAS as u8;
+                        self.i2c_read::<1>(buffer, Register::ID);
+                        self.state.set(State::InitId);
+                        Ok(())
+                    },
+                    State::InitId => {
                         // todo: use bitfield crate
-                        buffer[1] = 0b00100001;
+                        let val = 0b00100001;
 
                         // why is explicit length needed here?
-                        // TODO: propagate errors
-                        self.i2c.write(buffer, 2).unwrap();
+                        self.i2c_write(buffer, Register::CTRL_MEAS, [val]);
+                        self.state.set(State::InitConfiguring);
                         Ok(())
                     },
                     _ => Err(ErrorCode::ALREADY),
@@ -165,38 +171,43 @@ impl<'a, A: Alarm<'a>> Bmp280<'a, A> {
         )
     }
     
-    fn i2c_write<const COUNT: u8>(self, buffer: &'static mut [u8], addr: u8, data: [u8, COUNT]) {
-        buffer[0] = addr;
+    fn i2c_write<const COUNT: usize>(&self, buffer: &'static mut [u8], addr: Register, data: [u8; COUNT]) {
+        buffer[0] = addr as u8;
         for (i, d) in data.iter().enumerate() {
-            buffer[i + 1] = d;
+            buffer[i + 1] = *d;
         }
-        self.i2c.write(buffer, COUNT + 1).unwrap();
+        // TODO: propagate errors
+        self.i2c.write(buffer, COUNT as u8 + 1).unwrap();
     }
     
-    fn i2c_read<const COUNT: u8>(self, buffer: &'static mut [u8], addr: u8) {
-        buffer[0] = addr;
-        self.i2c.write(buffer, COUNT + 1).unwrap();
+    fn i2c_read<const COUNT: u8>(&self, buffer: &'static mut [u8], addr: Register) {
+        buffer[0] = addr as u8;
+        // TODO: propagate errors
+        self.i2c.write_read(buffer, 1, COUNT).unwrap();
     }
 
-    fn i2c_parse_read<const COUNT: u8>(buffer: &[u8]) -> &u8 {
-        &buffer[1..COUNT+1]
+    fn i2c_parse_read<const COUNT: u8>(buffer: &[u8]) -> &[u8] {
+        &buffer[1..(COUNT as usize +1)]
     }
 
     fn check_ready(&self, buffer: &'static mut [u8]) {
-        buffer[0] = Registers::STATUS as u8;
-        self.i2c.read(buffer, 2).unwrap();
+        self.i2c_read::<1>(buffer, Register::STATUS);
     }
 }
 
 impl<'a, A: Alarm<'a>> i2c::I2CClient for Bmp280<'a, A> {
     fn command_complete(&self, buffer: &'static mut [u8], status: Result<(), i2c::Error>) {
+        debug!("i2c_reply: {:?}", self.state.get());
         match status {
             Ok(()) => {
-                debug!("i2c_reply: {:?}", self.state.get());
                 let (new_state, temp, buffer) = match self.state.get() {
+                    State::InitId => {
+                        let id = Self::i2c_parse_read::<1>(buffer);
+                        debug!("{:?} {:?}", buffer, id);
+                        (State::InitConfiguring, None, None)
+                    },
                     State::InitConfiguring => {
-                        buffer[0] = Registers::DIG_T1 as u8;
-                        self.i2c.read(buffer, CALIBRATION_BYTES as u8 + 1).unwrap();
+                        self.i2c_read::<{CALIBRATION_BYTES as u8}>(buffer, Register::DIG_T1);
                         (State::InitReadingCalibration, None, None)
                     },
                     State::InitReadingCalibration => (
@@ -205,13 +216,11 @@ impl<'a, A: Alarm<'a>> i2c::I2CClient for Bmp280<'a, A> {
                         Some(buffer),
                     ),
                     State::Waiting(calibration) => {
-                    debug!("{:?}", buffer);
-                        // not ready yet
-                        if buffer[1] & 0b1000 == 0 {
-                            buffer[0] = Registers::TEMP_MSB as u8;
-                            // why is explicit length needed here?
-                            // TODO: propagate errors
-                            self.i2c.read(buffer, 4).unwrap();
+                        let waiting_value = Self::i2c_parse_read::<1>(buffer);
+                        debug!("{:?}", buffer);
+                        // not waiting
+                        if waiting_value[0] & 0b1000 == 0 {
+                            self.i2c_read::<3>(buffer, Register::TEMP_MSB);
                             (State::Reading(calibration), None, None)
                         } else {
                             self.check_ready(buffer);
@@ -219,9 +228,10 @@ impl<'a, A: Alarm<'a>> i2c::I2CClient for Bmp280<'a, A> {
                         }
                     }
                     State::Reading(calibration) => {
+                        let readout = Self::i2c_parse_read::<3>(buffer);
                         debug!("{:?}", buffer);
-                        let msb = buffer[1];
-                        let lsb = buffer[2];
+                        let msb = readout[1];
+                        let lsb = readout[2];
                         let raw_temp = ((msb as usize) << 8) + (lsb as usize);
                         (State::Idle(calibration), Some(calibration.temp_from_raw(raw_temp)), Some(buffer))
                     },
