@@ -226,6 +226,7 @@ impl<'a, A: Alarm<'a>> i2c::I2CClient for Bmp280<'a, A> {
                         if waiting & 0b1 == 0 {
                             // finished init
                             // todo: use bitfield crate
+                            // forced mode, oversampling 1
                             let val = 0b00100001;
                             self.i2c_write(buffer, Register::CTRL_MEAS, [val]);
                             (State::InitConfiguring, None, None)  
