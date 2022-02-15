@@ -29,7 +29,7 @@ enum Register {
     DIG_T3 = 0x8c,
     ID = 0xd0,
     RESET = 0xe0,
-    /// measuring: [3]
+    /// measuring: [3] (or is it really [4]? bit 4 is set on real hardware)
     /// im_update: [0]
     STATUS = 0xf3,
     /// osrs_t: [7:5]
@@ -72,7 +72,8 @@ impl CalibrationData {
     }
     
     fn temp_from_raw(&self, raw_temp: usize) -> usize {
-    // FIXME
+        // FIXME
+        debug!("raw temp: {}", raw_temp);
         raw_temp
     }
 }
@@ -83,6 +84,10 @@ impl CalibrationData {
 enum State {
     Uninitialized,
     InitId,
+    /// It's not guaranteed that the MCU reset is the same as device power-on,
+    /// so an explicit reset is necessary.
+    InitResetting,
+    InitWaitingReady,
     InitConfiguring,
     InitReadingCalibration,
     Idle(CalibrationData),
@@ -156,15 +161,6 @@ impl<'a, A: Alarm<'a>> Bmp280<'a, A> {
                         self.state.set(State::InitId);
                         Ok(())
                     },
-                    State::InitId => {
-                        // todo: use bitfield crate
-                        let val = 0b00100001;
-
-                        // why is explicit length needed here?
-                        self.i2c_write(buffer, Register::CTRL_MEAS, [val]);
-                        self.state.set(State::InitConfiguring);
-                        Ok(())
-                    },
                     _ => Err(ErrorCode::ALREADY),
                 }
             }
@@ -185,11 +181,21 @@ impl<'a, A: Alarm<'a>> Bmp280<'a, A> {
         // TODO: propagate errors
         self.i2c.write_read(buffer, 1, COUNT).unwrap();
     }
-
-    fn i2c_parse_read<const COUNT: u8>(buffer: &[u8]) -> &[u8] {
-        &buffer[1..(COUNT as usize +1)]
+    
+    fn read_i2c(&self, buffer: &'static mut [u8], addr: Register, count: u8) {
+        buffer[0] = addr as u8;
+        // TODO: propagate errors
+        self.i2c.write_read(buffer, 1, count).unwrap();
     }
 
+    fn i2c_parse_read<const COUNT: u8>(buffer: &[u8]) -> &[u8] {
+        &buffer[..(COUNT as usize)]
+    }
+
+    fn parse_read_i2c(buffer: &[u8], count: u8) -> &[u8] {
+        &buffer[..(count as usize)]
+    }
+    
     fn check_ready(&self, buffer: &'static mut [u8]) {
         self.i2c_read::<1>(buffer, Register::STATUS);
     }
@@ -203,24 +209,46 @@ impl<'a, A: Alarm<'a>> i2c::I2CClient for Bmp280<'a, A> {
                 let (new_state, temp, buffer) = match self.state.get() {
                     State::InitId => {
                         let id = Self::i2c_parse_read::<1>(buffer);
-                        debug!("{:?} {:?}", buffer, id);
-                        (State::InitConfiguring, None, None)
+                        debug!("id: {:b}", id[0]);
+                        if id[0] != 0x58 {
+                            // TODO: go into error state instead
+                            panic!("BMP280: wrong id");
+                        }
+                        self.i2c_write(buffer, Register::RESET, [0xb6]);
+                        (State::InitResetting, None, None)
+                    }
+                    State::InitResetting => {
+                        self.check_ready(buffer);
+                        (State::InitWaitingReady, None, None)
+                    },
+                    State::InitWaitingReady => {
+                        let waiting = Self::parse_read_i2c(buffer, 1)[0];
+                        if waiting & 0b1 == 0 {
+                            // finished init
+                            // todo: use bitfield crate
+                            let val = 0b00100001;
+                            self.i2c_write(buffer, Register::CTRL_MEAS, [val]);
+                            (State::InitConfiguring, None, None)  
+                        } else {
+                            self.check_ready(buffer);
+                            (State::InitWaitingReady, None, None)
+                        }
                     },
                     State::InitConfiguring => {
                         self.i2c_read::<{CALIBRATION_BYTES as u8}>(buffer, Register::DIG_T1);
                         (State::InitReadingCalibration, None, None)
                     },
-                    State::InitReadingCalibration => (
-                        State::Idle(CalibrationData::new(&buffer[1..])),
-                        None,
-                        Some(buffer),
-                    ),
+                    State::InitReadingCalibration => { 
+                        let data = Self::parse_read_i2c(buffer, CALIBRATION_BYTES as u8);
+                        (State::Idle(CalibrationData::new(data)), None, Some(buffer))
+                    },
                     State::Waiting(calibration) => {
-                        let waiting_value = Self::i2c_parse_read::<1>(buffer);
-                        debug!("{:?}", buffer);
+                        let waiting_value = Self::parse_read_i2c(buffer, 1);
+                        debug!("waiting: {:b}", waiting_value[0]);
                         // not waiting
-                        if waiting_value[0] & 0b1000 == 0 {
+                        if waiting_value[0] & 0b10000 == 0 {
                             self.i2c_read::<3>(buffer, Register::TEMP_MSB);
+                            //self.i2c_read::<3>(buffer, Register::PRESS_MSB);
                             (State::Reading(calibration), None, None)
                         } else {
                             self.check_ready(buffer);
@@ -228,10 +256,9 @@ impl<'a, A: Alarm<'a>> i2c::I2CClient for Bmp280<'a, A> {
                         }
                     }
                     State::Reading(calibration) => {
-                        let readout = Self::i2c_parse_read::<3>(buffer);
-                        debug!("{:?}", buffer);
-                        let msb = readout[1];
-                        let lsb = readout[2];
+                        let readout = Self::parse_read_i2c(buffer, 3);
+                        let msb = readout[0];
+                        let lsb = readout[1];
                         let raw_temp = ((msb as usize) << 8) + (lsb as usize);
                         (State::Idle(calibration), Some(calibration.temp_from_raw(raw_temp)), Some(buffer))
                     },
@@ -260,7 +287,7 @@ impl<'a, A: Alarm<'a>> i2c::I2CClient for Bmp280<'a, A> {
                 self.temperature_client.map(|cb| cb.callback(usize::MAX));
             }
         }
-        debug!("i2c_reply finished: {:?}", self.state.get());
+        debug!("new state: {:?}", self.state.get());
     }
 }
 
