@@ -29,6 +29,7 @@ use nrf52840::gpio::Pin;
 use nrf52840::interrupt_service::Nrf52840DefaultPeripherals;
 use nrf52_components::{self, UartChannel};
 
+mod gnss;
 mod periodic;
 
 // The backlight LED
@@ -471,6 +472,7 @@ pub unsafe fn main() {
         periodic::Periodic<'static, VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>, Print>,
         periodic::Periodic::new(periodic_virtual_alarm, Print(bmp280)),
     );
+    
     
     periodic_virtual_alarm.set_alarm_client(periodic);
     periodic.arm();
