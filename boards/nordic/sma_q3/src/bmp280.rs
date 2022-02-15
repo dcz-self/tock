@@ -29,7 +29,7 @@ enum Register {
     DIG_T3 = 0x8c,
     ID = 0xd0,
     RESET = 0xe0,
-    /// measuring: [3] (or is it really [4]? bit 4 is set on real hardware)
+    /// measuring: [3] (or is it really [2]? bit 2 is set on real hardware)
     /// im_update: [0]
     STATUS = 0xf3,
     /// osrs_t: [7:5]
@@ -71,10 +71,19 @@ impl CalibrationData {
         }
     }
     
-    fn temp_from_raw(&self, raw_temp: usize) -> usize {
+    fn temp_from_raw(&self, raw_temp: u32) -> i32 {
         // FIXME
         debug!("raw temp: {}", raw_temp);
-        raw_temp
+        let temp = raw_temp as i32; // guaranteed to succeed because raw temp has only 20 significant bits maximum.
+        let dig_t1 = self.dig_t1 as i32; // same, 16-bits
+        let dig_t2 = self.dig_t2 as i32; // same, 16-bits
+        let dig_t3 = self.dig_t3 as i32; // same, 16-bits
+        // From the datasheet
+        let var1 = (((temp >> 3) - (dig_t1 << 1)) * dig_t2) >> 11;
+        let a = (temp >> 4) - dig_t1;
+        let var2 = (((a * a) >> 12) * dig_t3) >> 14;
+        let t_fine = var1 + var2;
+        ((t_fine * 5) + 128) >> 8
     }
 }
 
@@ -260,8 +269,8 @@ impl<'a, A: Alarm<'a>> i2c::I2CClient for Bmp280<'a, A> {
                         let readout = Self::parse_read_i2c(buffer, 3);
                         let msb = readout[0];
                         let lsb = readout[1];
-                        let raw_temp = ((msb as usize) << 8) + (lsb as usize);
-                        (State::Idle(calibration), Some(calibration.temp_from_raw(raw_temp)), Some(buffer))
+                        let raw_temp = ((msb as u32) << 8) + (lsb as u32);
+                        (State::Idle(calibration), Some(calibration.temp_from_raw(raw_temp as u32)), Some(buffer))
                     },
                     other => {
                         debug!("BMP280 received i2c reply in state {:?}", other);
@@ -279,7 +288,7 @@ impl<'a, A: Alarm<'a>> i2c::I2CClient for Bmp280<'a, A> {
                 if let Some(temp) = temp {
                     debug!("temp {}", temp);
                     self.temperature_client
-                        .map(|cb| cb.callback(temp));
+                        .map(|cb| cb.callback(temp as usize));
                 }
             }
             _ => {
