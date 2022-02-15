@@ -154,7 +154,7 @@ impl<'a, A: Alarm<'a>> Bmp280<'a, A> {
                     self.i2c.enable();
                     // todo: use bitfield crate
                     // forced mode, oversampling 1
-                    let val = 0b10110101;
+                    let val = 0b00100001;
                     self.i2c_write(buffer, Register::CTRL_MEAS, [val]);
                     self.state.set(State::Configuring(calibration));
                     Ok(())
@@ -218,7 +218,7 @@ impl<'a, A: Alarm<'a>> Bmp280<'a, A> {
 
 impl<'a, A: Alarm<'a>> i2c::I2CClient for Bmp280<'a, A> {
     fn command_complete(&self, buffer: &'static mut [u8], status: Result<(), i2c::Error>) {
-        debug!("i2c_reply: {:?}", self.state.get());
+        //debug!("i2c_reply: {:?}", self.state.get());
         match status {
             Ok(()) => {
                 let (new_state, temp, buffer) = match self.state.get() {
@@ -259,7 +259,7 @@ impl<'a, A: Alarm<'a>> i2c::I2CClient for Bmp280<'a, A> {
                     },
                     State::Waiting(calibration) => {
                         let waiting_value = Self::parse_read_i2c(buffer, 1);
-                        debug!("waiting: {:b}", waiting_value[0]);
+                        //debug!("waiting: {:b}", waiting_value[0]);
                         // not waiting
                         if waiting_value[0] & 0b1000 == 0 {
                             self.read_i2c(buffer, Register::TEMP_MSB, 3);
@@ -301,7 +301,7 @@ impl<'a, A: Alarm<'a>> i2c::I2CClient for Bmp280<'a, A> {
                 self.temperature_client.map(|cb| cb.callback(usize::MAX));
             }
         }
-        debug!("new state: {:?}", self.state.get());
+        //debug!("new state: {:?}", self.state.get());
     }
 }
 
