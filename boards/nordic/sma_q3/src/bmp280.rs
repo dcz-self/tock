@@ -97,13 +97,17 @@ enum State {
     /// so an explicit reset is necessary.
     InitResetting,
     InitWaitingReady,
-    InitConfiguring,
     InitReadingCalibration,
+
     Idle(CalibrationData),
+
+    // States related to sample readout
+    /// One-shot mode request sent
+    Configuring(CalibrationData),
     /// A request is in flight, but has not been returned to userspace yet.
     /// Waiting for the readout to become ready.
     Waiting(CalibrationData),
-    /// Waiting for data to return.
+    /// Waiting for readout to return.
     /// This state can also lead back to Idle.
     Reading(CalibrationData),
 }
@@ -143,18 +147,20 @@ impl<'a, A: Alarm<'a>> Bmp280<'a, A> {
         match self.state.get() {
             // Actually, the sensor might be on, just in default state.
             Uninitialized => Err(ErrorCode::OFF),
-            InitConfiguring | InitReadingCalibration => Err(ErrorCode::BUSY),
+            InitId | InitResetting | InitWaitingReady | InitReadingCalibration => Err(ErrorCode::BUSY),
             Idle(calibration) => self.buffer.take().map_or_else(
                 || panic!("BMP280 No buffer available!"),
                 |buffer| {
-                    self.state.set(State::Waiting(calibration));
                     self.i2c.enable();
-                    self.check_ready(buffer);
+                    // todo: use bitfield crate
+                    // forced mode, oversampling 1
+                    let val = 0b10110101;
+                    self.i2c_write(buffer, Register::CTRL_MEAS, [val]);
+                    self.state.set(State::Configuring(calibration));
                     Ok(())
                 }
             ),
-            Reading(_calibration) | Waiting(_calibration) => Err(ErrorCode::BUSY),
-            _ => Ok(()),
+            Configuring(_) | Waiting(_) | Reading(_) => Err(ErrorCode::BUSY),
         }
     }
     
@@ -206,7 +212,7 @@ impl<'a, A: Alarm<'a>> Bmp280<'a, A> {
     }
     
     fn check_ready(&self, buffer: &'static mut [u8]) {
-        self.i2c_read::<1>(buffer, Register::STATUS);
+        self.read_i2c(buffer, Register::STATUS, 1)
     }
 }
 
@@ -232,33 +238,31 @@ impl<'a, A: Alarm<'a>> i2c::I2CClient for Bmp280<'a, A> {
                     },
                     State::InitWaitingReady => {
                         let waiting = Self::parse_read_i2c(buffer, 1)[0];
+                        debug!("waiting: {:b}", waiting);
                         if waiting & 0b1 == 0 {
                             // finished init
-                            // todo: use bitfield crate
-                            // forced mode, oversampling 1
-                            let val = 0b00100001;
-                            self.i2c_write(buffer, Register::CTRL_MEAS, [val]);
-                            (State::InitConfiguring, None, None)  
+                            self.i2c_read::<{CALIBRATION_BYTES as u8}>(buffer, Register::DIG_T1);
+                            (State::InitReadingCalibration, None, None)
                         } else {
                             self.check_ready(buffer);
                             (State::InitWaitingReady, None, None)
                         }
                     },
-                    State::InitConfiguring => {
-                        self.i2c_read::<{CALIBRATION_BYTES as u8}>(buffer, Register::DIG_T1);
-                        (State::InitReadingCalibration, None, None)
-                    },
                     State::InitReadingCalibration => { 
                         let data = Self::parse_read_i2c(buffer, CALIBRATION_BYTES as u8);
                         (State::Idle(CalibrationData::new(data)), None, Some(buffer))
+                    },
+                    // Readout-related states
+                    State::Configuring(calibration) => {
+                        self.check_ready(buffer);
+                        (State::Waiting(calibration), None, None)
                     },
                     State::Waiting(calibration) => {
                         let waiting_value = Self::parse_read_i2c(buffer, 1);
                         debug!("waiting: {:b}", waiting_value[0]);
                         // not waiting
-                        if waiting_value[0] & 0b10000 == 0 {
-                            self.i2c_read::<3>(buffer, Register::TEMP_MSB);
-                            //self.i2c_read::<3>(buffer, Register::PRESS_MSB);
+                        if waiting_value[0] & 0b1000 == 0 {
+                            self.read_i2c(buffer, Register::TEMP_MSB, 3);
                             (State::Reading(calibration), None, None)
                         } else {
                             self.check_ready(buffer);
