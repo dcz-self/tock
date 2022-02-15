@@ -29,7 +29,7 @@ enum Register {
     DIG_T3 = 0x8c,
     ID = 0xd0,
     RESET = 0xe0,
-    /// measuring: [3] (or is it really [2]? bit 2 is set on real hardware)
+    /// measuring: [3]
     /// im_update: [0]
     STATUS = 0xf3,
     /// osrs_t: [7:5]
@@ -58,7 +58,9 @@ struct CalibrationData {
     // TODO: pressure calibration
 }
 
-fn twobyte(msb: u8, lsb: u8) -> u16 {
+/// CAUTION: calibration data puts least significant byte in the lowest address,
+/// readouts do the opposite.
+fn twobyte(lsb: u8, msb: u8) -> u16 {
     ((msb as u16) << 8) + lsb as u16
 }
 
