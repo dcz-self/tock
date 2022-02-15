@@ -72,7 +72,6 @@ impl CalibrationData {
     }
     
     fn temp_from_raw(&self, raw_temp: u32) -> i32 {
-        // FIXME
         debug!("raw temp: {}", raw_temp);
         let temp = raw_temp as i32; // guaranteed to succeed because raw temp has only 20 significant bits maximum.
         let dig_t1 = self.dig_t1 as i32; // same, 16-bits
@@ -271,10 +270,11 @@ impl<'a, A: Alarm<'a>> i2c::I2CClient for Bmp280<'a, A> {
                     }
                     State::Reading(calibration) => {
                         let readout = Self::parse_read_i2c(buffer, 3);
-                        let msb = readout[0];
-                        let lsb = readout[1];
-                        let raw_temp = ((msb as u32) << 8) + (lsb as u32);
-                        (State::Idle(calibration), Some(calibration.temp_from_raw(raw_temp as u32)), Some(buffer))
+                        let msb = readout[0] as u32;
+                        let lsb = readout[1] as u32;
+                        let xlsb = readout[2] as u32;
+                        let raw_temp = (msb << 12) + (lsb << 4) + (xlsb >> 4);
+                        (State::Idle(calibration), Some(calibration.temp_from_raw(raw_temp)), Some(buffer))
                     },
                     other => {
                         debug!("BMP280 received i2c reply in state {:?}", other);
