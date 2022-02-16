@@ -464,7 +464,7 @@ pub unsafe fn main() {
     
     periodic_virtual_alarm.set_alarm_client(periodic);
     periodic.arm();
-    bmp280.begin_initialize().unwrap();
+    bmp280.begin_reset().unwrap();
     let platform = Platform {
         temperature,
         button,
