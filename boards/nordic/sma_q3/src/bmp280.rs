@@ -188,7 +188,6 @@ impl<'a, A: Alarm<'a>> Bmp280<'a, A> {
     
     /// Resets the device and brings it into a known state.
     pub fn begin_reset(&self) -> Result<(), ErrorCode> {
-        debug!("init: {:?}", self.state.get());
         self.buffer.take().map_or_else(
             || panic!("BMP280 No buffer available!"),
             |buffer| {
@@ -207,7 +206,6 @@ impl<'a, A: Alarm<'a>> Bmp280<'a, A> {
 
     pub fn read_temperature(&self) -> Result<(), ErrorCode> {
         use State::*;
-        debug!("read temp: {:?}", self.state.get());
         match self.state.get() {
             // Actually, the sensor might be on, just in default state.
             Uninitialized => Err(ErrorCode::OFF),
@@ -260,7 +258,6 @@ impl<'a, A: Alarm<'a>> Bmp280<'a, A> {
 impl<'a, A: Alarm<'a>> i2c::I2CClient for Bmp280<'a, A> {
     fn command_complete(&self, buffer: &'static mut [u8], status: Result<(), i2c::Error>) {
         const INVALID_TEMPERATURE: i32 = i32::MIN;
-        //debug!("i2c_reply: {:?}", self.state.get());
         let mut return_buffer = None;
         let mut temp_readout = None;
 
@@ -268,7 +265,6 @@ impl<'a, A: Alarm<'a>> i2c::I2CClient for Bmp280<'a, A> {
             Ok(()) => match self.state.get() {
                 State::InitId => {
                     let id = I2cWrapper::parse_read(buffer, 1);
-                    debug!("id: {:b}", id[0]);
                     if id[0] == 0x58 {
                         self.i2c.write(buffer, Register::RESET, [0xb6]);
                         State::InitResetting
@@ -282,7 +278,6 @@ impl<'a, A: Alarm<'a>> i2c::I2CClient for Bmp280<'a, A> {
                 },
                 State::InitWaitingReady => {
                     let waiting = I2cWrapper::parse_read(buffer, 1)[0];
-                    debug!("waiting: {:b}", waiting);
                     if waiting & 0b1 == 0 {
                         // finished init
                         self.i2c.read(buffer, Register::DIG_T1, CALIBRATION_BYTES as u8);
@@ -306,7 +301,6 @@ impl<'a, A: Alarm<'a>> i2c::I2CClient for Bmp280<'a, A> {
                 },
                 State::Waiting(calibration) => {
                     let waiting_value = I2cWrapper::parse_read(buffer, 1);
-                    //debug!("waiting: {:b}", waiting_value[0]);
                     // not waiting
                     if waiting_value[0] & 0b1000 == 0 {
                         self.i2c.read(buffer, Register::TEMP_MSB, 3);
@@ -357,11 +351,9 @@ impl<'a, A: Alarm<'a>> i2c::I2CClient for Bmp280<'a, A> {
         // in case the callback wants to use the same driver again.
         self.state.set(new_state);
         if let Some(temp) = temp_readout {
-            debug!("temp {}", temp);
             self.temperature_client
                 .map(|cb| cb.callback(temp as usize));
         }
-        //debug!("new state: {:?}", self.state.get());
     }
 }
 
