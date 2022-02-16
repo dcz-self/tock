@@ -23,11 +23,11 @@
 //! bmp280.begin_reset();
 //! ```
 
+use crate::i2c::I2CComponent;
+use crate::i2c_component_helper;
 use capsules::bmp280::Bmp280;
 use capsules::virtual_alarm::{MuxAlarm, VirtualMuxAlarm};
 use capsules::virtual_i2c::MuxI2C;
-use crate::i2c::I2CComponent;
-use crate::i2c_component_helper;
 use core::mem::MaybeUninit;
 use kernel::component::Component;
 use kernel::hil::time::Alarm;
@@ -48,7 +48,7 @@ macro_rules! bmp280_component_helper {
         use capsules::bmp280::Bmp280;
         use core::mem::MaybeUninit;
 
-        static mut BUFFER: [u8; bmp280::CALIBRATION_BYTES + 1] = [0; bmp280::CALIBRATION_BYTES + 1];
+        static mut BUFFER: [u8; bmp280::BUFFER_SIZE] = [0; bmp280::BUFFER_SIZE];
 
         static mut BMP280: MaybeUninit<Bmp280<'static, VirtualMuxAlarm<'static, $A>>> =
             MaybeUninit::uninit();
@@ -81,8 +81,8 @@ impl<A: 'static + Alarm<'static>> Component for Bmp280Component<A> {
     type Output = &'static Bmp280<'static, VirtualMuxAlarm<'static, A>>;
 
     unsafe fn finalize(self, static_buffer: Self::StaticInput) -> Self::Output {
-        let bmp280_i2c = I2CComponent::new(self.i2c_mux, static_buffer.3)
-            .finalize(i2c_component_helper!());
+        let bmp280_i2c =
+            I2CComponent::new(self.i2c_mux, static_buffer.3).finalize(i2c_component_helper!());
 
         let bmp280_alarm = static_init_half!(
             static_buffer.0,
