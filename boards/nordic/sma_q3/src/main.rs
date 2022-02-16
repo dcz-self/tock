@@ -9,8 +9,11 @@
 #![cfg_attr(not(doc), no_main)]
 #![deny(missing_docs)]
 
+use capsules::bmp280::Bmp280;
 use capsules::virtual_aes_ccm::MuxAES128CCM;
 use capsules::virtual_alarm::VirtualMuxAlarm;
+use components::bmp280_component_helper;
+use components::bmp280::Bmp280Component;
 use kernel::component::Component;
 use kernel::dynamic_deferred_call::{DynamicDeferredCall, DynamicDeferredCallClientState};
 use kernel::hil::i2c::I2CMaster;
@@ -25,8 +28,6 @@ use nrf52840::gpio::Pin;
 use nrf52840::interrupt_service::Nrf52840DefaultPeripherals;
 use nrf52_components::{self, UartChannel};
 
-mod bmp280;
-mod c_bmp280;
 mod periodic;
 
 // The backlight LED
@@ -404,8 +405,8 @@ pub unsafe fn main() {
     );
     base_peripherals.twi1.set_master_client(sensors_i2c_bus);
         
-    let bmp280 = c_bmp280::Bmp280Component::new(sensors_i2c_bus, mux_alarm).finalize(
-        bmp280_component_helper!(nrf52840::rtc::Rtc<'static>, bmp280::BASE_ADDR),
+    let bmp280 = Bmp280Component::new(sensors_i2c_bus, mux_alarm).finalize(
+        bmp280_component_helper!(nrf52840::rtc::Rtc<'static>),
     );
 
     let temperature = components::temperature::TemperatureComponent::new(
@@ -450,7 +451,7 @@ pub unsafe fn main() {
     periodic_virtual_alarm.setup();
     use kernel::hil::time::Alarm;
     
-    struct Print(&'static bmp280::Bmp280<'static, VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>>);
+    struct Print(&'static Bmp280<'static, VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>>);
     impl periodic::Callable for Print {
         fn next(&mut self) {
             debug!("read request: {:?}", self.0.read_temperature());

@@ -3,8 +3,6 @@
 //! Based off the SHT3x code.
 //!
 //! Not implemented: pressure
-//!
-//! TODO: convert to calibrated, check status, sleep before checking status
 
 use core::cell::Cell;
 use kernel::debug;

@@ -12,7 +12,7 @@
 //! let bmp280 = components::bmp280::Bmp280Component::new(sensors_i2c_bus, mux_alarm).finalize(
 //!         components::bmp280_component_helper!(nrf52::rtc::Rtc<'static>),
 //!     );
-//! bmp280.begin_initialize();
+//! bmp280.begin_reset();
 //! ```
 //!
 //! With a specified i2c address
@@ -20,14 +20,14 @@
 //! let bmp280 = components::bmp280::Bmp280Component::new(sensors_i2c_bus, mux_alarm).finalize(
 //!         components::bmp280_component_helper!(nrf52::rtc::Rtc<'static>, capsules::bmp280::BASE_ADDR),
 //!     );
-//! bmp280.begin_initialize();
+//! bmp280.begin_reset();
 //! ```
 
-use crate::bmp280::Bmp280;
+use capsules::bmp280::Bmp280;
 use capsules::virtual_alarm::{MuxAlarm, VirtualMuxAlarm};
 use capsules::virtual_i2c::MuxI2C;
-use components::i2c::I2CComponent;
-use components::i2c_component_helper;
+use crate::i2c::I2CComponent;
+use crate::i2c_component_helper;
 use core::mem::MaybeUninit;
 use kernel::component::Component;
 use kernel::hil::time::Alarm;
@@ -38,14 +38,14 @@ use kernel::static_init_half;
 #[macro_export]
 macro_rules! bmp280_component_helper {
     ($A:ty) => {{
-        use crate::bmp280;
+        use capsules::bmp280;
         $crate::bmp280_component_helper!($A, bmp280::BASE_ADDR)
     }};
 
     // used for specifically stating the i2c address
     // as some boards (like nrf52) require a shift
     ($A:ty, $address: expr) => {{
-        use crate::bmp280::Bmp280;
+        use capsules::bmp280::Bmp280;
         use core::mem::MaybeUninit;
 
         static mut BUFFER: [u8; bmp280::CALIBRATION_BYTES + 1] = [0; bmp280::CALIBRATION_BYTES + 1];
