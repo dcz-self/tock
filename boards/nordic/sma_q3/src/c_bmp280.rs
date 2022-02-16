@@ -97,8 +97,7 @@ impl<A: 'static + Alarm<'static>> Component for Bmp280Component<A> {
             Bmp280::new(bmp280_i2c, static_buffer.1, bmp280_alarm)
         );
         bmp280_i2c.set_client(bmp280);
-        // TODO: need to implement waiting for ready
-        //bmp280_alarm.set_alarm_client(bmp280);
+        bmp280_alarm.set_alarm_client(bmp280);
 
         bmp280
     }

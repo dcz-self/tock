@@ -120,8 +120,43 @@ enum State {
     Error,
 }
 
-pub struct Bmp280<'a, A: Alarm<'a>> {
+/// Complies with the reading and writing protocol used by the sensor.
+struct I2cWrapper<'a> {
     i2c: &'a dyn i2c::I2CDevice,
+}
+
+impl<'a> I2cWrapper<'a> {
+    fn write<const COUNT: usize>(&self, buffer: &'static mut [u8], addr: Register, data: [u8; COUNT]) {
+        buffer[0] = addr as u8;
+        for (i, d) in data.iter().enumerate() {
+            buffer[i + 1] = *d;
+        }
+        // TODO: propagate errors
+        self.i2c.enable();
+        self.i2c.write(buffer, COUNT as u8 + 1).unwrap();
+    }
+
+    /// Requests a read into buffer.
+    /// Parse the result using `parse_read`.
+    fn read(&self, buffer: &'static mut [u8], addr: Register, count: u8) {
+        buffer[0] = addr as u8;
+        // TODO: propagate errors
+        self.i2c.enable();
+        self.i2c.write_read(buffer, 1, count).unwrap();
+    }
+
+    fn disable(&self) {
+        self.i2c.disable()
+    }
+    
+    fn parse_read(buffer: &[u8], count: u8) -> &[u8] {
+        &buffer[..(count as usize)]
+    }
+}
+
+
+pub struct Bmp280<'a, A: Alarm<'a>> {
+    i2c: I2cWrapper<'a>,
     temperature_client: OptionalCell<&'a dyn hil::sensors::TemperatureClient>,
     // This might be better as a `RefCell`,
     // because `State` is multiple bytes due to the `CalibrationData`.
@@ -143,7 +178,7 @@ impl<'a, A: Alarm<'a>> Bmp280<'a, A> {
         alarm: &'a A,
     ) -> Self {
         Self {
-            i2c: i2c,
+            i2c: I2cWrapper{ i2c },
             temperature_client: OptionalCell::empty(),
             state: Cell::new(State::Uninitialized),
             buffer: TakeCell::new(buffer),
@@ -159,8 +194,7 @@ impl<'a, A: Alarm<'a>> Bmp280<'a, A> {
             |buffer| {
                 match self.state.get() {
                     State::Uninitialized | State::Error => {
-                        self.i2c.enable();
-                        self.i2c_read::<1>(buffer, Register::ID);
+                        self.i2c.read(buffer, Register::ID, 1);
                         self.state.set(State::InitId);
                         Ok(())
                     },
@@ -181,11 +215,10 @@ impl<'a, A: Alarm<'a>> Bmp280<'a, A> {
             Idle(calibration) => self.buffer.take().map_or_else(
                 || panic!("BMP280 No buffer available!"),
                 |buffer| {
-                    self.i2c.enable();
                     // todo: use bitfield crate
                     // forced mode, oversampling 1
                     let val = 0b00100001;
-                    self.i2c_write(buffer, Register::CTRL_MEAS, [val]);
+                    self.i2c.write(buffer, Register::CTRL_MEAS, [val]);
                     self.state.set(State::Configuring(calibration));
                     Ok(())
                 },
@@ -202,12 +235,13 @@ impl<'a, A: Alarm<'a>> Bmp280<'a, A> {
             WaitingForAlarm(calibration) => self.buffer.take().map_or_else(
                 || panic!("BMP280 No buffer available!"),
                 |buffer| {
-                    self.i2c.enable();
                     self.check_ready(buffer);
                     self.state.set(State::Waiting(calibration))
                 },
             ),
-            _ => {}
+            other => {
+                debug!("BMP280 received unexpected alarm in state {:?}", other);
+            },
         }
     }
     
@@ -217,38 +251,9 @@ impl<'a, A: Alarm<'a>> Bmp280<'a, A> {
         let delay = self.alarm.ticks_from_us(6400);
         self.alarm.set_alarm(self.alarm.now(), delay);
     }
-
-    fn i2c_write<const COUNT: usize>(&self, buffer: &'static mut [u8], addr: Register, data: [u8; COUNT]) {
-        buffer[0] = addr as u8;
-        for (i, d) in data.iter().enumerate() {
-            buffer[i + 1] = *d;
-        }
-        // TODO: propagate errors
-        self.i2c.write(buffer, COUNT as u8 + 1).unwrap();
-    }
-    
-    fn i2c_read<const COUNT: u8>(&self, buffer: &'static mut [u8], addr: Register) {
-        buffer[0] = addr as u8;
-        // TODO: propagate errors
-        self.i2c.write_read(buffer, 1, COUNT).unwrap();
-    }
-    
-    fn read_i2c(&self, buffer: &'static mut [u8], addr: Register, count: u8) {
-        buffer[0] = addr as u8;
-        // TODO: propagate errors
-        self.i2c.write_read(buffer, 1, count).unwrap();
-    }
-
-    fn i2c_parse_read<const COUNT: u8>(buffer: &[u8]) -> &[u8] {
-        &buffer[..(COUNT as usize)]
-    }
-
-    fn parse_read_i2c(buffer: &[u8], count: u8) -> &[u8] {
-        &buffer[..(count as usize)]
-    }
     
     fn check_ready(&self, buffer: &'static mut [u8]) {
-        self.read_i2c(buffer, Register::STATUS, 1)
+        self.i2c.read(buffer, Register::STATUS, 1)
     }
 }
 
@@ -262,10 +267,10 @@ impl<'a, A: Alarm<'a>> i2c::I2CClient for Bmp280<'a, A> {
         let new_state = match status {
             Ok(()) => match self.state.get() {
                 State::InitId => {
-                    let id = Self::i2c_parse_read::<1>(buffer);
+                    let id = I2cWrapper::parse_read(buffer, 1);
                     debug!("id: {:b}", id[0]);
                     if id[0] == 0x58 {
-                        self.i2c_write(buffer, Register::RESET, [0xb6]);
+                        self.i2c.write(buffer, Register::RESET, [0xb6]);
                         State::InitResetting
                     } else {
                         State::MismatchedDevice
@@ -276,11 +281,11 @@ impl<'a, A: Alarm<'a>> i2c::I2CClient for Bmp280<'a, A> {
                     State::InitWaitingReady
                 },
                 State::InitWaitingReady => {
-                    let waiting = Self::parse_read_i2c(buffer, 1)[0];
+                    let waiting = I2cWrapper::parse_read(buffer, 1)[0];
                     debug!("waiting: {:b}", waiting);
                     if waiting & 0b1 == 0 {
                         // finished init
-                        self.i2c_read::<{CALIBRATION_BYTES as u8}>(buffer, Register::DIG_T1);
+                        self.i2c.read(buffer, Register::DIG_T1, CALIBRATION_BYTES as u8);
                         State::InitReadingCalibration
                     } else {
                         self.check_ready(buffer);
@@ -288,7 +293,7 @@ impl<'a, A: Alarm<'a>> i2c::I2CClient for Bmp280<'a, A> {
                     }
                 },
                 State::InitReadingCalibration => { 
-                    let data = Self::parse_read_i2c(buffer, CALIBRATION_BYTES as u8);
+                    let data = I2cWrapper::parse_read(buffer, CALIBRATION_BYTES as u8);
                     let calibration = CalibrationData::new(data);
                     return_buffer = Some(buffer);
                     State::Idle(calibration)
@@ -300,11 +305,11 @@ impl<'a, A: Alarm<'a>> i2c::I2CClient for Bmp280<'a, A> {
                     State::WaitingForAlarm(calibration)
                 },
                 State::Waiting(calibration) => {
-                    let waiting_value = Self::parse_read_i2c(buffer, 1);
+                    let waiting_value = I2cWrapper::parse_read(buffer, 1);
                     //debug!("waiting: {:b}", waiting_value[0]);
                     // not waiting
                     if waiting_value[0] & 0b1000 == 0 {
-                        self.read_i2c(buffer, Register::TEMP_MSB, 3);
+                        self.i2c.read(buffer, Register::TEMP_MSB, 3);
                         State::Reading(calibration)
                     } else {
                         self.check_ready(buffer);
@@ -312,7 +317,7 @@ impl<'a, A: Alarm<'a>> i2c::I2CClient for Bmp280<'a, A> {
                     }
                 }
                 State::Reading(calibration) => {
-                    let readout = Self::parse_read_i2c(buffer, 3);
+                    let readout = I2cWrapper::parse_read(buffer, 3);
                     let msb = readout[0] as u32;
                     let lsb = readout[1] as u32;
                     let xlsb = readout[2] as u32;
@@ -362,7 +367,7 @@ impl<'a, A: Alarm<'a>> i2c::I2CClient for Bmp280<'a, A> {
 
 impl<'a, A: Alarm<'a>> hil::sensors::TemperatureDriver<'a> for Bmp280<'a, A> {
     fn set_client(&self, client: &'a dyn hil::sensors::TemperatureClient) {
-        self.temperature_client.set(client);
+        self.temperature_client.set(client)
     }
 
     fn read_temperature(&self) -> Result<(), ErrorCode> {
@@ -372,6 +377,6 @@ impl<'a, A: Alarm<'a>> hil::sensors::TemperatureDriver<'a> for Bmp280<'a, A> {
 
 impl<'a, A: hil::time::Alarm<'a>> hil::time::AlarmClient for Bmp280<'a, A> {
     fn alarm(&self) {
-        self.handle_alarm();
+        self.handle_alarm()
     }
 }
