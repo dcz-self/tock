@@ -8,6 +8,7 @@
 
 use core::cell::Cell;
 use kernel::debug;
+use kernel::hil;
 use kernel::hil::i2c;
 use kernel::hil::time::Alarm;
 use kernel::utilities::cells::{OptionalCell, TakeCell};
@@ -115,7 +116,7 @@ enum State {
 
 pub struct Bmp280<'a, A: Alarm<'a>> {
     i2c: &'a dyn i2c::I2CDevice,
-    temperature_client: OptionalCell<&'a dyn kernel::hil::sensors::TemperatureClient>,
+    temperature_client: OptionalCell<&'a dyn hil::sensors::TemperatureClient>,
     // This might be better as a `RefCell`,
     // because `State` is multiple bytes due to the `CalibrationData`.
     // `Cell` requires Copy, which might get expensive, while `RefCell` doesn't.
@@ -124,6 +125,8 @@ pub struct Bmp280<'a, A: Alarm<'a>> {
     state: Cell<State>,
     /// Stores i2c commands
     buffer: TakeCell<'static, [u8]>,
+    /// Needed to wait for readout completion, which can take milliseconds.
+    /// It's possible to implement this without an alarm with busy polling, but that's wasteful.
     alarm: &'a A,
 }
 
@@ -307,12 +310,17 @@ impl<'a, A: Alarm<'a>> i2c::I2CClient for Bmp280<'a, A> {
     }
 }
 
-impl<'a, A: Alarm<'a>> kernel::hil::sensors::TemperatureDriver<'a> for Bmp280<'a, A> {
-    fn set_client(&self, client: &'a dyn kernel::hil::sensors::TemperatureClient) {
+impl<'a, A: Alarm<'a>> hil::sensors::TemperatureDriver<'a> for Bmp280<'a, A> {
+    fn set_client(&self, client: &'a dyn hil::sensors::TemperatureClient) {
         self.temperature_client.set(client);
     }
 
     fn read_temperature(&self) -> Result<(), ErrorCode> {
         self.read_temperature()
+    }
+}
+
+impl<'a, A: hil::time::Alarm<'a>> hil::time::AlarmClient for Bmp280<'a, A> {
+    fn alarm(&self) {
     }
 }
