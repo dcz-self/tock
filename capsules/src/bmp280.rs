@@ -60,6 +60,7 @@ struct CalibrationData {
 
 /// CAUTION: calibration data puts least significant byte in the lowest address,
 /// readouts do the opposite.
+#[inline]
 fn twobyte(lsb: u8, msb: u8) -> u16 {
     ((msb as u16) << 8) + lsb as u16
 }
@@ -74,7 +75,6 @@ impl CalibrationData {
     }
 
     fn temp_from_raw(&self, raw_temp: u32) -> i32 {
-        debug!("raw temp: {}", raw_temp);
         let temp = raw_temp as i32; // guaranteed to succeed because raw temp has only 20 significant bits maximum.
         let dig_t1 = self.dig_t1 as i32; // same, 16-bits
         let dig_t2 = self.dig_t2 as i32; // same, 16-bits
@@ -192,7 +192,10 @@ impl<'a, A: Alarm<'a>> Bmp280<'a, A> {
     /// Resets the device and brings it into a known state.
     pub fn begin_reset(&self) -> Result<(), ErrorCode> {
         self.buffer.take().map_or_else(
-            || panic!("BMP280 No buffer available!"),
+            || {
+                debug!("BMP280 No buffer available!");
+                Err(ErrorCode::NODEVICE)
+            },
             |buffer| match self.state.get() {
                 State::Uninitialized | State::Error => {
                     let (ret, new_state) = match self.i2c.read(buffer, Register::ID, 1) {
@@ -223,7 +226,12 @@ impl<'a, A: Alarm<'a>> Bmp280<'a, A> {
             State::Idle(calibration) => {
                 self.buffer
                     .take()
-                    .map_or(Err(ErrorCode::NODEVICE), |buffer| {
+                    .map_or_else(
+                        || {
+                            debug!("BMP280 No buffer available!");
+                            Err(ErrorCode::NODEVICE)
+                        },
+                        |buffer| {
                         // todo: use bitfield crate
                         // forced mode, oversampling 1
                         let val = 0b00100001;
@@ -251,7 +259,9 @@ impl<'a, A: Alarm<'a>> Bmp280<'a, A> {
 
     fn handle_alarm(&self) {
         match self.state.get() {
-            State::WaitingForAlarm(calibration) => self.buffer.take().map_or((), |buffer| {
+            State::WaitingForAlarm(calibration) => self.buffer.take().map_or_else(
+                || debug!("BMP280 No buffer available!"),
+                |buffer| {
                 let new_state = match self.check_ready(buffer) {
                     Ok(()) => State::Waiting(calibration),
                     Err((_e, buffer)) => {
