@@ -399,8 +399,8 @@ pub unsafe fn main() {
         use kernel::hil::uart::Receive;
         
         base_peripherals.uarte0.initialize(
-            nrf52840::pinmux::Pinmux::new(Pin::P0_30 as u32),
             nrf52840::pinmux::Pinmux::new(Pin::P0_31 as u32),
+            nrf52840::pinmux::Pinmux::new(Pin::P0_30 as u32),
             None,
             None,
         );
