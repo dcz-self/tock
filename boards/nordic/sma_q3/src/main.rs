@@ -404,13 +404,13 @@ pub unsafe fn main() {
             None,
             None,
         );
-        dbg!(base_peripherals.uarte0.configure(uart::Parameters {
+        base_peripherals.uarte0.configure(uart::Parameters {
             baud_rate: 9600,
             width: uart::Width::Eight,
             parity: uart::Parity::None,
             stop_bits: uart::StopBits::One,
             hw_flow_control: false,
-        })).unwrap();
+        }).unwrap();
         static mut BUFFER: [u8; gnss::BUFFER_SIZE] = [0; gnss::BUFFER_SIZE];
 
         let gnss = kernel::static_init!(
@@ -418,6 +418,7 @@ pub unsafe fn main() {
             gnss::Gnss::new(&base_peripherals.uarte0, &mut BUFFER),
         );
         base_peripherals.uarte0.set_receive_client(gnss);
+        gnss.start_receive();
         
         use kernel::hil::gpio::Configure as _;
         use kernel::hil::gpio::Output;
@@ -464,14 +465,14 @@ pub unsafe fn main() {
     struct Print(&'static Bmp280<'static, VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>>);
     impl periodic::Callable for Print {
         fn next(&mut self) {
-            debug!("read request: {:?}", self.0.read_temperature());
+            //debug!("read request: {:?}", self.0.read_temperature());
         }
     }
     
     struct TempCelsius;
     impl TemperatureClient for TempCelsius {
         fn callback(&self, temp: usize) {
-            debug!("Temp: {} °C", temp);
+            //debug!("Temp: {} °C", temp);
         }
     }
 
