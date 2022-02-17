@@ -21,7 +21,7 @@ impl<'a, 'b: 'a, T: uart::Receive<'a>> Gnss<'b, T> where Self: 'a {
         }
     }
     pub fn start_receive(&self) {
-        dbg!(self.uart.receive_buffer(self.buffer.take().unwrap(), BUFFER_SIZE)).unwrap();
+        dbg!(self.uart.receive_buffer(self.buffer.take().unwrap(), 1)).unwrap();
     }
 }
 
@@ -33,7 +33,9 @@ impl<'a, T: uart::Receive<'a>> uart::ReceiveClient for Gnss<'_, T> where Self: '
         rcode: Result<(), ErrorCode>,
         error: uart::Error,
     ) {
-        kernel::debug!("uart rx: {}", core::str::from_utf8(&buffer[..rx_len]).unwrap_or("-----INVALID"));
+        dbg!(rcode);
+        dbg!(error);
+        kernel::debug!("uart rx: {}", core::str::from_utf8(dbg!(&buffer[..dbg!(rx_len)])).unwrap_or("-----INVALID"));
 
         self.buffer.replace(buffer);
         self.start_receive();

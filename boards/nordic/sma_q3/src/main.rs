@@ -393,7 +393,7 @@ pub unsafe fn main() {
     )
     .finalize(());
     
-    {
+    let gnss = {
         use kernel::hil::uart;
         use kernel::hil::uart::Configure;
         use kernel::hil::uart::Receive;
@@ -413,7 +413,7 @@ pub unsafe fn main() {
         }).unwrap();
         static mut BUFFER: [u8; gnss::BUFFER_SIZE] = [0; gnss::BUFFER_SIZE];
 
-        let gnss = kernel::static_init!(
+        let gnss: &'static _ = kernel::static_init!(
             gnss::Gnss::<nrf52840::uart::Uarte>,
             gnss::Gnss::new(&base_peripherals.uarte0, &mut BUFFER),
         );
@@ -425,7 +425,8 @@ pub unsafe fn main() {
         let pin = &nrf52840_peripherals.gpio_port[Pin::P0_29];
         pin.make_output();
         pin.set();
-    }
+        gnss
+    };
     
     let rng = components::rng::RngComponent::new(
         board_kernel,
