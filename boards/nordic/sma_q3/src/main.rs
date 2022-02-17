@@ -31,6 +31,7 @@ use nrf52_components::{self, UartChannel};
 
 mod gnss;
 mod periodic;
+mod util;
 
 // The backlight LED
 const LED1_PIN: Pin = Pin::P0_08;
