@@ -204,37 +204,11 @@ pub unsafe fn main() {
         capsules::gpio::DRIVER_NUM,
         components::gpio_component_helper!(
             nrf52840::gpio::GPIOPin,
-            // left side of the USB plug
-            0 => &nrf52840_peripherals.gpio_port[Pin::P0_13],
-            1 => &nrf52840_peripherals.gpio_port[Pin::P0_15],
-            2 => &nrf52840_peripherals.gpio_port[Pin::P0_17],
-            3 => &nrf52840_peripherals.gpio_port[Pin::P0_20],
-            4 => &nrf52840_peripherals.gpio_port[Pin::P0_22],
-            5 => &nrf52840_peripherals.gpio_port[Pin::P0_24],
-            6 => &nrf52840_peripherals.gpio_port[Pin::P1_00],
-            7 => &nrf52840_peripherals.gpio_port[Pin::P0_09],
-            8 => &nrf52840_peripherals.gpio_port[Pin::P0_10],
-            // right side of the USB plug
-            9 => &nrf52840_peripherals.gpio_port[Pin::P0_31],
-            10 => &nrf52840_peripherals.gpio_port[Pin::P0_29],
-            11 => &nrf52840_peripherals.gpio_port[Pin::P0_02],
-            12 => &nrf52840_peripherals.gpio_port[Pin::P1_15],
-            13 => &nrf52840_peripherals.gpio_port[Pin::P1_13],
-            14 => &nrf52840_peripherals.gpio_port[Pin::P1_10],
-            // Below the PCB
-            15 => &nrf52840_peripherals.gpio_port[Pin::P0_26],
-            16 => &nrf52840_peripherals.gpio_port[Pin::P0_04],
-            17 => &nrf52840_peripherals.gpio_port[Pin::P0_11],
-            18 => &nrf52840_peripherals.gpio_port[Pin::P0_14],
-            19 => &nrf52840_peripherals.gpio_port[Pin::P1_11],
-            20 => &nrf52840_peripherals.gpio_port[Pin::P1_07],
-            21 => &nrf52840_peripherals.gpio_port[Pin::P1_01],
-            22 => &nrf52840_peripherals.gpio_port[Pin::P1_04],
-            23 => &nrf52840_peripherals.gpio_port[Pin::P1_02]
+            0 => &nrf52840_peripherals.gpio_port[Pin::P0_29],
         ),
     )
     .finalize(components::gpio_component_buf!(nrf52840::gpio::GPIOPin));
-
+    
     let button = components::button::ButtonComponent::new(
         board_kernel,
         capsules::button::DRIVER_NUM,
@@ -418,6 +392,39 @@ pub unsafe fn main() {
         bmp280,
     )
     .finalize(());
+    
+    {
+        use kernel::hil::uart;
+        use kernel::hil::uart::Configure;
+        use kernel::hil::uart::Receive;
+        
+        base_peripherals.uarte0.initialize(
+            nrf52840::pinmux::Pinmux::new(Pin::P0_30 as u32),
+            nrf52840::pinmux::Pinmux::new(Pin::P0_31 as u32),
+            None,
+            None,
+        );
+        dbg!(base_peripherals.uarte0.configure(uart::Parameters {
+            baud_rate: 9600,
+            width: uart::Width::Eight,
+            parity: uart::Parity::None,
+            stop_bits: uart::StopBits::One,
+            hw_flow_control: false,
+        })).unwrap();
+        static mut BUFFER: [u8; gnss::BUFFER_SIZE] = [0; gnss::BUFFER_SIZE];
+
+        let gnss = kernel::static_init!(
+            gnss::Gnss::<nrf52840::uart::Uarte>,
+            gnss::Gnss::new(&base_peripherals.uarte0, &mut BUFFER),
+        );
+        base_peripherals.uarte0.set_receive_client(gnss);
+        
+        use kernel::hil::gpio::Configure as _;
+        use kernel::hil::gpio::Output;
+        let pin = &nrf52840_peripherals.gpio_port[Pin::P0_29];
+        pin.make_output();
+        pin.set();
+    }
     
     let rng = components::rng::RngComponent::new(
         board_kernel,

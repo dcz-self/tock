@@ -6,15 +6,21 @@ use kernel::utilities::cells::TakeCell;
 
 use crate::dbg;
 
-const BUFFER_SIZE: usize = 64;
+pub const BUFFER_SIZE: usize = 64;
 
-struct Gnss<'a, T>{
+pub struct Gnss<'a, T>{
     uart: &'a T,
     buffer: TakeCell<'static, [u8]>,
 }
 
-impl<'a, T: uart::Receive<'a>> Gnss<'_, T> where Self: 'a {
-    fn start_receive(&self) {
+impl<'a, 'b: 'a, T: uart::Receive<'a>> Gnss<'b, T> where Self: 'a {
+    pub fn new(uart: &'b T, buffer: &'static mut [u8]) -> Self {
+        Self {
+            uart,
+            buffer: TakeCell::new(buffer),
+        }
+    }
+    pub fn start_receive(&self) {
         dbg!(self.uart.receive_buffer(self.buffer.take().unwrap(), BUFFER_SIZE)).unwrap();
     }
 }
@@ -32,5 +38,4 @@ impl<'a, T: uart::Receive<'a>> uart::ReceiveClient for Gnss<'_, T> where Self: '
         self.buffer.replace(buffer);
         self.start_receive();
     }
-    
 }
