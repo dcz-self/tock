@@ -200,7 +200,7 @@ pub trait Receive<'a> {
     fn receive_word(&self) -> Result<(), ErrorCode>;
 
     /// Abort any ongoing receive transfers and return what is in the
-    /// receive buffer with the `receive_complete` callback. If
+    /// receive buffer with the appropriate callback. If
     /// Ok(()) is returned, there will be no callback (no call to
     /// `receive` was outstanding). If there was a `receive`
     /// outstanding, which is cancelled successfully then `BUSY` will
