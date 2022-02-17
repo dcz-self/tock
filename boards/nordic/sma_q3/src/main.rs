@@ -16,6 +16,7 @@ use components::bmp280_component_helper;
 use components::bmp280::Bmp280Component;
 use kernel::component::Component;
 use kernel::dynamic_deferred_call::{DynamicDeferredCall, DynamicDeferredCallClientState};
+use kernel::hil::sensors::{TemperatureClient, TemperatureDriver};
 use kernel::hil::i2c::I2CMaster;
 use kernel::hil::led::LedHigh;
 use kernel::hil::symmetric_encryption::AES128;
@@ -458,6 +459,14 @@ pub unsafe fn main() {
         }
     }
     
+    struct TempCelsius;
+    impl TemperatureClient for TempCelsius {
+        fn callback(&self, temp: usize) {
+            debug!("Temp: {} °C", temp);
+        }
+    }
+
+    bmp280.set_client(&TempCelsius);
     let periodic = static_init!(
         periodic::Periodic<'static, VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>, Print>,
         periodic::Periodic::new(periodic_virtual_alarm, Print(bmp280)),
