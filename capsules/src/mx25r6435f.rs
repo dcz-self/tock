@@ -75,15 +75,21 @@ const PAGE_SIZE: u32 = 256;
 /// ```
 /// # use capsules::mx25r6435f::Mx25r6435fSector;
 ///
-/// static mut PAGEBUFFER: Mx25r6435fSector = Mx25r6435fSector::default();
+/// static mut PAGEBUFFER: Mx25r6435fSector = Mx25r6435fSector::new();
 /// ```
 pub struct Mx25r6435fSector(pub [u8; SECTOR_SIZE as usize]);
 
-impl Default for Mx25r6435fSector {
-    fn default() -> Self {
+impl Mx25r6435fSector {
+    pub const fn new() -> Self {
         Self {
             0: [0; SECTOR_SIZE as usize],
         }
+    }
+}
+
+impl Default for Mx25r6435fSector {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
