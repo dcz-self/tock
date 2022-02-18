@@ -390,8 +390,6 @@ pub unsafe fn main() {
     
     let flash = {
         use kernel::hil::flash::Flash;
-        use capsules::mx25r6435f::{Mx25r6435fSector};
-        static mut PAGEBUFFER: Mx25r6435fSector = Mx25r6435fSector::new();
         
         let mux_spi =
         components::spi::SpiMuxComponent::new(&base_peripherals.spim0, dynamic_deferred_caller)
@@ -403,7 +401,7 @@ pub unsafe fn main() {
             nrf52840::pinmux::Pinmux::new(Pin::P0_16 as u32),
         );
         
-        let mx25r6435f = components::mx25r6435f::Mx25r6435fComponent::new(
+        components::mx25r6435f::Mx25r6435fComponent::new(
             None,
             None,
             &nrf52840_peripherals.gpio_port[Pin::P0_14] as &dyn kernel::hil::gpio::Pin,
@@ -414,9 +412,11 @@ pub unsafe fn main() {
             nrf52840::spi::SPIM,
             nrf52840::gpio::GPIOPin,
             nrf52840::rtc::Rtc,
-        ));
-            
+        ))
     };
+    
+    use capsules::mx25r6435f::{Mx25r6435fSector, MX25R6435F};
+    static mut PAGEBUFFER: Mx25r6435fSector = Mx25r6435fSector::new();
     
     let gnss = {
         use kernel::hil::uart;
@@ -439,8 +439,16 @@ pub unsafe fn main() {
         static mut BUFFER: [u8; gnss::BUFFER_SIZE] = [0; gnss::BUFFER_SIZE];
 
         let gnss: &'static _ = kernel::static_init!(
-            gnss::Gnss::<nrf52840::uart::Uarte>,
-            gnss::Gnss::new(&base_peripherals.uarte0, &mut BUFFER),
+            gnss::Gnss::<
+                nrf52840::uart::Uarte,
+                MX25R6435F<
+                    'static,
+                    capsules::virtual_spi::VirtualSpiMasterDevice<'static, nrf52840::spi::SPIM>,
+                    nrf52840::gpio::GPIOPin<'static>,
+                    VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>
+                >,
+            >,
+            gnss::Gnss::new(&base_peripherals.uarte0, flash, &mut BUFFER),
         );
         base_peripherals.uarte0.set_receive_client(gnss);
         gnss.start_receive();
@@ -452,6 +460,10 @@ pub unsafe fn main() {
         pin.set();
         gnss
     };
+    use kernel::hil::flash::{Flash, HasClient};
+    flash.set_client(gnss);
+    dbg!(flash.read_page(43, &mut PAGEBUFFER));
+    
     
     let rng = components::rng::RngComponent::new(
         board_kernel,
