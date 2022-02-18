@@ -42,11 +42,6 @@ const VIBRA1_PIN: Pin = Pin::P0_19;
 // The side button
 const BUTTON_PIN: Pin = Pin::P0_17;
 
-// SPI pins not currently in use, but left here for convenience
-const _SPI_MOSI: Pin = Pin::P1_01;
-const _SPI_MISO: Pin = Pin::P1_02;
-const _SPI_CLK: Pin = Pin::P1_04;
-
 /// I2C pins for the temp/pressure sensor
 const I2C_TEMP_SDA_PIN: Pin = Pin::P1_15;
 const I2C_TEMP_SCL_PIN: Pin = Pin::P0_02;
@@ -392,6 +387,36 @@ pub unsafe fn main() {
         bmp280,
     )
     .finalize(());
+    
+    let flash = {
+        use kernel::hil::flash::Flash;
+        use capsules::mx25r6435f::{Mx25r6435fSector};
+        static mut PAGEBUFFER: Mx25r6435fSector = Mx25r6435fSector::new();
+        
+        let mux_spi =
+        components::spi::SpiMuxComponent::new(&base_peripherals.spim0, dynamic_deferred_caller)
+            .finalize(components::spi_mux_component_helper!(nrf52840::spi::SPIM));
+        
+        base_peripherals.spim0.configure(
+            nrf52840::pinmux::Pinmux::new(Pin::P0_15 as u32),
+            nrf52840::pinmux::Pinmux::new(Pin::P0_13 as u32),
+            nrf52840::pinmux::Pinmux::new(Pin::P0_16 as u32),
+        );
+        
+        let mx25r6435f = components::mx25r6435f::Mx25r6435fComponent::new(
+            None,
+            None,
+            &nrf52840_peripherals.gpio_port[Pin::P0_14] as &dyn kernel::hil::gpio::Pin,
+            mux_alarm,
+            mux_spi,
+        )
+        .finalize(components::mx25r6435f_component_helper!(
+            nrf52840::spi::SPIM,
+            nrf52840::gpio::GPIOPin,
+            nrf52840::rtc::Rtc,
+        ));
+            
+    };
     
     let gnss = {
         use kernel::hil::uart;
