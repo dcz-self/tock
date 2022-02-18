@@ -229,6 +229,8 @@ impl<
         )
     }
 
+    /// Requests the readout of a 24-bit identification number.
+    /// This command will cause a debug print when succeeded.
     pub fn read_identification(&self) -> Result<(), ErrorCode> {
         self.configure_spi()?;
 
@@ -376,7 +378,7 @@ impl<
                 self.txbuffer.replace(write_buffer);
                 read_buffer.map(|read_buffer| {
                     debug!(
-                        "id {:#x} {:#x} {:#x}",
+                        "id 0x{:02x}{:02x}{:02x}",
                         read_buffer[1], read_buffer[2], read_buffer[3]
                     );
                     self.rxbuffer.replace(read_buffer);
