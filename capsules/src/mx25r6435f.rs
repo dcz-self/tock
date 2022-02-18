@@ -75,7 +75,7 @@ const PAGE_SIZE: u32 = 256;
 /// ```
 /// # use capsules::mx25r6435f::Mx25r6435fSector;
 ///
-/// static mut PAGEBUFFER: Mx25r6435fSector = Mx25r6435fSector::new();
+/// static mut PAGEBUFFER: Mx25r6435fSector = Mx25r6435fSector::default();
 /// ```
 pub struct Mx25r6435fSector(pub [u8; SECTOR_SIZE as usize]);
 
