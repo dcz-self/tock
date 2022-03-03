@@ -462,7 +462,9 @@ pub unsafe fn main() {
     };
     use kernel::hil::flash::{Flash, HasClient};
     flash.set_client(gnss);
-    dbg!(flash.read_page(43, &mut PAGEBUFFER));
+    PAGEBUFFER.as_mut()[0] = 42;
+//    dbg!(flash.write_page(43, &mut PAGEBUFFER));
+    dbg!(flash.erase_page(43));
     
     
     let rng = components::rng::RngComponent::new(

@@ -1,5 +1,6 @@
 /*! Prints out GNSS output. Nothing fancy yet.
  */
+use kernel::debug;
 use kernel::hil;
 use kernel::hil::uart;
 use kernel::ErrorCode;
@@ -47,6 +48,10 @@ impl<'a, T, F: hil::flash::Flash> hil::flash::Client<F> for Gnss<'a, T, F> {
     fn read_complete(&self, buffer: &'static mut F::Page, error: hil::flash::Error) {
         dbg!(&buffer.as_mut()[0..16]);
     }
-    fn write_complete(&self, buffer: &'static mut F::Page, error: hil::flash::Error) {}
-    fn erase_complete(&self, error: hil::flash::Error) {}
+    fn write_complete(&self, buffer: &'static mut F::Page, error: hil::flash::Error) {
+        debug!("written");
+    }
+    fn erase_complete(&self, error: hil::flash::Error) {
+        debug!("erased");
+    }
 }
