@@ -235,7 +235,7 @@ impl<'a, F: LegacyFlash, H: Hasher<'a, 8>> hasher::Client<'a, 8> for TicKVStore<
     }
 }
 
-impl<'a, F: Flash, H: Hasher<'a, 8>> flash::Client<F> for TicKVStore<'a, F, H> {
+impl<'a, F: LegacyFlash, H: Hasher<'a, 8>> flash::LegacyClient<F> for TicKVStore<'a, F, H> {
     fn read_complete(&self, pagebuffer: &'static mut F::Page, _error: flash::Error) {
         self.tickv.set_read_buffer(pagebuffer.as_mut());
         self.tickv
