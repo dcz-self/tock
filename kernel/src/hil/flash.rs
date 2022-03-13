@@ -345,7 +345,7 @@ pub trait Flash<const W: usize, const E: usize> {
     /// On success, triggers `Client::erase_complete` once.
     fn erase(&self, region: &Region<E>) -> Result<(), ErrorCode>;
 
-    /// Return the size of the device in bytes.
+    /// Returns the size of the device in bytes.
     fn get_size(&self) -> Result<u64, ErrorCode>;
 }
 
@@ -354,21 +354,15 @@ pub trait Client<const W: usize, const E: usize> {
     /// Flash read complete.
     ///
     /// This will be called when the read operation is complete.
-    /// On success `ret` will be nothing.
-    /// On error `ret` will contain a `ErrorCode`
     fn read_complete(&self, read_buffer: &'static mut [u8], ret: Result<(), ErrorCode>);
 
     /// Flash write complete.
     ///
     /// This will be called when the write operation is complete.
-    /// On success `ret` will be nothing.
-    /// On error `ret` will contain a `ErrorCode`
     fn write_complete(&self, write_buffer: &'static mut [u8], ret: Result<(), ErrorCode>);
 
     /// Flash erase complete.
     ///
     /// This will be called when the erase operation is complete.
-    /// On success `ret` will be nothing.
-    /// On error `ret` will contain a `ErrorCode`
     fn erase_complete(&self, ret: Result<(), ErrorCode>);
 }
