@@ -602,19 +602,6 @@ impl<
         S: hil::spi::SpiMasterDevice + 'a,
         P: hil::gpio::Pin + 'a,
         A: hil::time::Alarm<'a> + 'a,
-        C: hil::flash::LegacyClient<Self>,
-    > hil::flash::HasClient<'a, C> for MX25R6435F<'a, S, P, A>
-{
-    fn set_client(&self, client: &'a C) {
-        self.client.set(client);
-    }
-}
-
-impl<
-        'a,
-        S: hil::spi::SpiMasterDevice + 'a,
-        P: hil::gpio::Pin + 'a,
-        A: hil::time::Alarm<'a> + 'a,
     > hil::flash::LegacyFlash for MX25R6435F<'a, S, P, A>
 {
     type Page = Mx25r6435fSector;
@@ -640,31 +627,61 @@ impl<
     }
 }
 
+type Region = hil::block_storage::Region<SECTOR_SIZE>;
 
 impl<
         'a,
         S: hil::spi::SpiMasterDevice + 'a,
         P: hil::gpio::Pin + 'a,
         A: hil::time::Alarm<'a> + 'a,
-    > hil::flash::Flash<SECTOR_SIZE, SECTOR_SIZE> for MX25R6435F<'a, S, P, A>
+    > hil::block_storage::BlockStorage<SECTOR_SIZE, SECTOR_SIZE> for MX25R6435F<'a, S, P, A>
 {
-    fn read_page(
+    fn read_range(
         &self,
-        page_number: usize,
-        buf: &'static mut Self::Page,
-    ) -> Result<(), (ErrorCode, &'static mut Self::Page)> {
-        self.read_sector(page_number as u32, buf)
+        range: &AddressRange,
+        buf: &'static mut [u8],
+    ) -> Result<(), (ErrorCode, &'static mut [u8])> {
+        Err(ErrorCode::NOSUPPORT)
+    }
+    
+    fn read(
+        &self,
+        region: &Region,
+        buf: &'static mut [u8],
+    ) -> Result<(), (ErrorCode, &'static mut [u8])> {
+        unimplemented!()
+    }
+    
+    fn write(
+        &self,
+        region: &Region,
+        buf: &'static mut [u8],
+    ) -> Result<(), (ErrorCode, &'static mut [u8])> {
+        unimplemented!()
     }
 
-    fn write_page(
-        &self,
-        page_number: usize,
-        buf: &'static mut Self::Page,
-    ) -> Result<(), (ErrorCode, &'static mut Self::Page)> {
-        self.write_sector(page_number as u32, buf)
+    fn erase(&self, region: &Region<E>) -> Result<(), ErrorCode> {
+        unimplemented!()
     }
 
-    fn erase_page(&self, page_number: usize) -> Result<(), ErrorCode> {
-        self.erase_sector(page_number as u32)
+    /// Returns the size of the device in bytes.
+    fn get_size(&self) -> Result<u64, ErrorCode> {
+        // TODO: it's probably a good idea to discover the size in advance,
+        // for the sake of compatible devices.
+        Ok(8 * 1024 * 1024)
     }
 }
+
+impl<
+        'a,
+        S: hil::spi::SpiMasterDevice + 'a,
+        P: hil::gpio::Pin + 'a,
+        A: hil::time::Alarm<'a> + 'a,
+        C: hil::block_storage::Client<Self>,
+    > hil::block_storage::HasClient<'a, C> for MX25R6435F<'a, S, P, A>
+{
+    fn set_client(&self, client: &'a C) {
+        self.client.set(client);
+    }
+}
+
