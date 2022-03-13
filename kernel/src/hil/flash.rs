@@ -165,88 +165,188 @@ pub trait LegacyClient<F: LegacyFlash> {
     fn erase_complete(&self, error: Error);
 }
 
-/// A checked flash region
-pub struct Page {
-    pub address: u64,
-    pub length: u32,
+/// An index to a block within device composed of `S`-sized blocks.
+pub struct BlockIndex<const S: u32>(pub u32, PhantomData<[(), S]>);
+
+impl<const S: u32> BlockIndex<R> {
+    /// Returns the index to the block at `index`.
+    pub fn new(index: u32) -> Self {
+        Self(index, Default::default())
+    }
+    /// Returns the index that contains the address.
+    pub fn new_containing(address: u64) -> Self {
+        Self::new(address / S)
+    }
+
+    /// Returns the index starting at the given address, if any.
+    pub fn new_starting_at(address: u64) -> Option<Self> {
+        if address % S == 0 {
+            Some(Self::new(address / S))
+        } else { None }
+    }
 }
 
-/// A page of writeable persistent flash memory.
+impl<const S: u32> From<BlockIndex<S>> for u64 {
+    fn from(index: BlockIndex<S>) -> Self {
+        index.0 as u64 * S as u64
+    }
+}
+
+/// A memory region composed of consecutive `S`-sized blocks.
+pub struct Region<const S: u32>{
+    pub index: BlockIndex<S>,
+    pub length_blocks: u32,
+}
+
+impl<const S: u32> Region<S> {
+    /// Returns the smallest region made of blocks which contains
+    /// the specified range of addresses.
+    pub fn new_containing(range: AddressRange) -> Self {
+        let index = BlockIndex::new_containing(range.start_address);
+        Self {
+            index,
+            length_blocks: {
+                (range.start_address % E + range.length_bytes)
+                    .div_ceil(E) // CAUTION: nightly
+            },
+        }
+    }
+
+    /// Returns the region starting and ending exactly in the same places
+    /// as the given `range`, if such exists.
+    pub fn new_exact(range: AddressRange) -> Option<Self> {
+        BlockIndex::new_starting_at(range.start_address)
+            .and_then(|index| {
+                if range.length_bytes % size == 0 {
+                    Some(Self {
+                        index,
+                        length_blocks = range.length_bytes / size,
+                    })
+                } else {
+                    None
+                }
+            })
+    }
+    
+    pub fn get_length_bytes(&self) -> u32 {
+        self.length_blocks * S
+    }
+}
+
+/// Specifies a storage area with byte granularity.
+pub struct AddressRange {
+    /// Offset from the beginning of the storage device.
+    pub start_address: u64,
+    /// Length of the range.
+    pub length_bytes: u32,
+}
+
+impl<const S: u32> From<Region<S>> for AddressRange {
+    fn from(region: Region<S>) -> Self {
+        Self {
+            start_address: region.index.into(),
+            length_bytes: region.get_length_bytes(),
+        }
+    }
+}
+
+/// Writeable persistent flash memory device.
 ///
-/// `W`: Should be the minimum number of bytes that can be written
-///      in an operation.
-/// `E`: Should be the minimum number of bytes that can be erased
-///      in an operation.
+/// The device is formed from equally-sized storage blocks,
+/// which are arranged one after another, without gaps or overlaps,
+/// to form a linear storage of bytes.
+///
+/// There device is split into blocks in two ways, into:
+/// - erase blocks, which are the smallest unit of space that can be erased
+/// - write blocks, which are the smallest unit of space that can be written
+///
+/// Every byte on the device belongs to exactly one erase block,
+/// and to exactly one write block at the same time.
+///
+/// `W`: The size of a write block in bytes.
+/// `E`: The size of an erase block in bytes.
 pub trait Flash<const W: usize, const E: usize> {
     /// Read data from flash into a buffer.
     ///
-    /// This function will read data stored in flash at `address` and
-    /// `length` into the buffer `buf`.
-    /// `address` is calculated as an offset from the start of the flash
-    /// region.
+    /// This function will read data stored in flash at `range` into `buf`.
     ///
-    /// On success returns nothing
+    /// `ErrorCode::INVAL` will be returned if
+    /// - `range` exceeds the end of the device, or
+    /// - `buf` is shorter than `range`.
+    ///
+    /// On success, triggers `Client::read_complete` once.
     /// On failure returns a `ErrorCode` and the buffer passed in.
-    /// If `ErrorCode::NOSUPPORT` is returned then `read_page()`
-    // should be used instead.
+    /// If `ErrorCode::NOSUPPORT` is returned then `read_block`
+    /// should be used instead.
     fn read(
         &self,
-        region: &Page,
+        range: &AddressRange,
         buf: &'static mut [u8],
     ) -> Result<(), (ErrorCode, &'static mut [u8])>;
 
-    /// Create a `Page` from the provided `address` and `length`.
+    /// Read data from blocks starting at `block`, and into the buffer.
     ///
-    /// The `Page->address` and Page->length` will be modified to match
-    /// the flash hardware requirements.
-    fn get_read_region(&self, address: u64, length: u32) -> Result<Page, ErrorCode>;
+    /// `ErrorCode::INVAL` will be returned if
+    /// - `range` exceeds the end of the device, or
+    /// - `buf` is shorter than `region`.
+    ///
+    /// On success, triggers `Client::read_complete` once.
+    fn read_blocks(
+        &self,
+        region: &Region<W>,
+        buf: &'static mut [u8],
+    ) -> Result<(), (ErrorCode, &'static mut [u8])>;
 
     /// Write data from a buffer to flash.
     ///
-    /// This function will write the buffer `buf` to the `address` specified
-    /// in flash.
+    /// This function writes the contents of `buf` to memory,
+    /// starting at the chosen `start_block`.
     ///
-    /// `address` must be aligned to `W`.
-    /// The length of `buf` must be aligned to `W`.
+    /// `ErrorCode::INVAL` will be returned if
+    /// - `range` exceeds the end of the device, or
+    /// - `buf` is shorter than `region`.
     ///
-    /// This function will not erase the page first. The user of this function
-    /// must ensure that a page is erased before writing.
-    /// Writes to flash can only turn a `1` to a `0`. To change a `0` to a `1`
-    /// the region must be erased.
+    /// This function SHALL NOT prepare the block for writing first.
+    /// The user of this function SHOULD ensure that a block is erased
+    /// before calling `write` (see `erase`).
     ///
-    /// Note that some hardware only allows a limited number of writes before
-    /// an erase. If that is the case the implementation MUST return an error
+    /// Once a byte has been written as part of a write block,
+    /// it SHOULD NOT be written again until it's erased as part of an erase block.
+    /// Multiple writes to the same block are possible in this trait,
+    /// but the result is dependent on the nature of the underlying hardware,
+    /// and this interface does not provide a way to discover that.
+    ///
+    /// **Note** about raw flash devices: writes can turn bits from `1` to `0`.
+    /// To change a bit from `0` to `1`, a region must be erased.
+    ///
+    /// **Note**: some raw flash hardware only allows a limited number of writes before
+    /// an erase. If that is the case, the implementation MUST return an error
     /// `ErrorCode::NOMEM` when this happens, even if the hardware silently
     /// ignores the write.
     ///
-    /// On success returns nothing
+    /// On success, triggers `Client::write_complete` once.
     /// On failure returns a `ErrorCode` and the buffer passed in.
     fn write(
         &self,
-        region: &Page,
+        region: &Region<W>,
         buf: &'static mut [u8],
     ) -> Result<(), (ErrorCode, &'static mut [u8])>;
 
-    /// Create a `Page` from the provided `address` and `length`.
+    /// Makes a region ready for writing.
     ///
-    /// The `Page->address` and Page->length` will be modified to match
-    /// the flash hardware requirements.
-    fn get_write_region(&self, address: u64, length: u32) -> Result<Page, ErrorCode>;
+    /// This corresponds roughly to the erase operation on raw flash devices,
+    /// but may also do nothing on devices where erasure is not necessary.
+    ///
+    /// Calling `erase` may modify bytes in the selected `region` in any way
+    /// (typically, on raw flash devices, all bits will be set,
+    /// i.e. each byte turns to 0xFF.
+    ///
+    /// If `region` exceeds the size of the device, returns `ErrorCode::INVAL`.
+    /// On success, triggers `Client::erase_complete` once.
+    fn erase(&self, region: &Region<E>) -> Result<(), ErrorCode>;
 
-    /// Erase a page/pages of flash, setting every byte to 0xFF.
-    ///
-    /// This will erase all pages starting from `address` for the `length`.
-    /// `address` and `length must allign with `E`.
-    ///
-    /// On success returns nothing
-    /// On failure returns a `ErrorCode`.
-    fn erase(&self, region: &Page) -> Result<(), ErrorCode>;
-
-    /// Create a `Page` from the provided `address` and `length`.
-    ///
-    /// The `Page->address` and Page->length` will be modified to match
-    /// the flash hardware requirements.
-    fn get_erase_region(&self, address: u64, length: u32) -> Result<Page, ErrorCode>;
+    /// Return the size of the device in bytes.
+    fn get_size(&self) -> Result<u64, ErrorCode>;
 }
 
 /// Implement `Client` to receive callbacks from `Flash`.

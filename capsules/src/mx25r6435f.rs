@@ -639,3 +639,32 @@ impl<
         self.erase_sector(page_number as u32)
     }
 }
+
+
+impl<
+        'a,
+        S: hil::spi::SpiMasterDevice + 'a,
+        P: hil::gpio::Pin + 'a,
+        A: hil::time::Alarm<'a> + 'a,
+    > hil::flash::Flash<SECTOR_SIZE, SECTOR_SIZE> for MX25R6435F<'a, S, P, A>
+{
+    fn read_page(
+        &self,
+        page_number: usize,
+        buf: &'static mut Self::Page,
+    ) -> Result<(), (ErrorCode, &'static mut Self::Page)> {
+        self.read_sector(page_number as u32, buf)
+    }
+
+    fn write_page(
+        &self,
+        page_number: usize,
+        buf: &'static mut Self::Page,
+    ) -> Result<(), (ErrorCode, &'static mut Self::Page)> {
+        self.write_sector(page_number as u32, buf)
+    }
+
+    fn erase_page(&self, page_number: usize) -> Result<(), ErrorCode> {
+        self.erase_sector(page_number as u32)
+    }
+}
