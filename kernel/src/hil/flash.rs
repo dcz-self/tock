@@ -339,7 +339,7 @@ pub trait Flash<const W: usize, const E: usize> {
     ///
     /// Calling `erase` may modify bytes in the selected `region` in any way
     /// (typically, on raw flash devices, all bits will be set,
-    /// i.e. each byte turns to 0xFF.
+    /// i.e. each byte turns to 0xFF).
     ///
     /// If `region` exceeds the size of the device, returns `ErrorCode::INVAL`.
     /// On success, triggers `Client::erase_complete` once.
