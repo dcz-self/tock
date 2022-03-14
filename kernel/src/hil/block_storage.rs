@@ -13,8 +13,8 @@
 //!
 //! struct RawFlashChip {};
 //!
-//! type WriteBlock = hil::block_storage::Block<WRITE_BLOCK_BYTES>;
-//! type EraseBlock = hil::block_storage::Block<ERASE_BLOCK_BYTES>;
+//! type WriteRegion = hil::block_storage::Region<WRITE_BLOCK_BYTES>;
+//! type EraseRegion = hil::block_storage::Region<ERASE_BLOCK_BYTES>;
 //!
 //! impl hil::block_storage::BlockStorage<WRITE_BLOCK_BYTES, ERASE_BLOCK_BYTES> for RawFlashChip {
 //!     (implement associated functions here)
@@ -31,14 +31,14 @@
 //!
 //! struct SimpleBlockDevice {};
 //!
-//! type Block = hil::block_storage::Block<BLOCK_BYTES>;
+//! type Region = hil::block_storage::Region<BLOCK_BYTES>;
 //!
 //! impl hil::block_storage::BlockStorage<BLOCK_BYTES, BLOCK_BYTES> for SimpleBlockDevice {
 //!     // FTL takes care of multiple writes to the same block on flash,
 //!     // and magnetic drives don't need to erase at all.
-//!     fn erase(&self, region: &Region)
+//!     fn erase(&self, region: &hil::block_storage::Region)
 //!         -> Result<(), ErrorCode>
-//!     { }
+//!     { Ok(()) }
 //!     
 //!     (implement remaining associated functions here)
 //! }
