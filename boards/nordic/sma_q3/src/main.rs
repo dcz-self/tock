@@ -388,9 +388,9 @@ pub unsafe fn main() {
     )
     .finalize(());
     
+    use kernel::hil::block_storage::BlockStorage;
+
     let flash = {
-        use kernel::hil::flash::Flash;
-        
         let mux_spi =
         components::spi::SpiMuxComponent::new(&base_peripherals.spim0, dynamic_deferred_caller)
             .finalize(components::spi_mux_component_helper!(nrf52840::spi::SPIM));
@@ -415,8 +415,9 @@ pub unsafe fn main() {
         ))
     };
     
-    use capsules::mx25r6435f::{Mx25r6435fSector, MX25R6435F};
-    static mut PAGEBUFFER: Mx25r6435fSector = Mx25r6435fSector::new();
+    use capsules::mx25r6435f;
+    static mut PAGEBUFFER: [u8; mx25r6435f::SECTOR_SIZE as usize]
+        = [0; mx25r6435f::SECTOR_SIZE as usize];
     
     let gnss = {
         use kernel::hil::uart;
@@ -441,14 +442,14 @@ pub unsafe fn main() {
         let gnss: &'static _ = kernel::static_init!(
             gnss::Gnss::<
                 nrf52840::uart::Uarte,
-                MX25R6435F<
+                mx25r6435f::MX25R6435F<
                     'static,
                     capsules::virtual_spi::VirtualSpiMasterDevice<'static, nrf52840::spi::SPIM>,
                     nrf52840::gpio::GPIOPin<'static>,
                     VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>
                 >,
             >,
-            gnss::Gnss::new(&base_peripherals.uarte0, flash, &mut BUFFER),
+            gnss::Gnss::new(&base_peripherals.uarte0, flash, &mut PAGEBUFFER),
         );
         base_peripherals.uarte0.set_receive_client(gnss);
         gnss.start_receive();
@@ -460,12 +461,14 @@ pub unsafe fn main() {
         pin.set();
         gnss
     };
-    use kernel::hil::flash::{Flash, HasClient};
+    use kernel::hil;
+    use kernel::hil::block_storage::HasClient;
     flash.set_client(gnss);
-    PAGEBUFFER.as_mut()[0] = 42;
-//    dbg!(flash.write_page(43, &mut PAGEBUFFER));
-    dbg!(flash.erase_page(43));
-    
+    let region = mx25r6435f::Region{
+        index: hil::block_storage::BlockIndex(43),
+        length_blocks: 1,
+    };
+    dbg!(flash.erase(&region));
     
     let rng = components::rng::RngComponent::new(
         board_kernel,

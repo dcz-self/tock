@@ -63,7 +63,7 @@ pub static mut TXBUFFER: [u8; PAGE_SIZE as usize + 4] = [0; PAGE_SIZE as usize +
 pub static mut RXBUFFER: [u8; PAGE_SIZE as usize + 4] = [0; PAGE_SIZE as usize + 4];
 
 const SPI_SPEED: u32 = 8000000;
-const SECTOR_SIZE: u32 = 4096;
+pub const SECTOR_SIZE: u32 = 4096;
 const PAGE_SIZE: u32 = 256;
 
 // TODO: remove alias
@@ -552,7 +552,7 @@ impl<
     }
 }
 
-type Region = hil::block_storage::Region<SECTOR_SIZE>;
+ pub type Region = hil::block_storage::Region<SECTOR_SIZE>;
 
 impl<
         'a,

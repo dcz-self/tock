@@ -50,13 +50,9 @@ use crate::ErrorCode;
 pub struct BlockIndex<const S: u32>(pub u32);
 
 impl<const S: u32> BlockIndex<S> {
-    /// Returns the index to the block at `index`.
-    pub fn new(index: u32) -> Self {
-        Self(index)
-    }
     /// Returns the index that contains the address.
     pub fn new_containing(address: u64) -> Self {
-        Self::new((address / S as u64) as u32)
+        Self((address / S as u64) as u32)
     }
 
     /// Returns the index starting at the given address, if any.
