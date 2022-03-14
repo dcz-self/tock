@@ -46,6 +46,7 @@
 use crate::ErrorCode;
 
 /// An index to a block within device composed of `S`-sized blocks.
+#[derive(Clone, Copy)]
 pub struct BlockIndex<const S: u32>(pub u32);
 
 impl<const S: u32> BlockIndex<S> {
@@ -75,6 +76,7 @@ impl<const S: u32> From<BlockIndex<S>> for u64 {
 }
 
 /// A memory region composed of consecutive `S`-sized blocks.
+#[derive(Clone, Copy)]
 pub struct Region<const S: u32> {
     pub index: BlockIndex<S>,
     pub length_blocks: u32,
@@ -128,6 +130,12 @@ pub struct AddressRange {
     pub start_address: u64,
     /// Length of the range.
     pub length_bytes: u32,
+}
+
+impl AddressRange {
+    pub fn get_end_address(&self) -> u64 {
+        self.start_address + self.length_bytes as u64
+    }
 }
 
 impl<const S: u32> From<Region<S>> for AddressRange {
@@ -246,7 +254,7 @@ pub trait HasClient<'a, C> {
 }
 
 /// Implement `Client` to receive callbacks from `BlockStorage`.
-pub trait Client<const W: usize, const E: usize> {
+pub trait Client<const W: u32, const E: u32> {
     /// Block read complete.
     ///
     /// This will be called when the read operation is complete.
