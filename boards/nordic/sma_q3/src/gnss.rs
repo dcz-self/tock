@@ -25,7 +25,7 @@ impl<'a, 'b: 'a, T: uart::Receive<'a>, F> Gnss<'b, T, F> where Self: 'a {
         }
     }
     pub fn start_receive(&self) {
-        //self.uart.receive_buffer(self.read_buffer.take().unwrap(), BUFFER_SIZE).unwrap();
+        self.uart.receive_buffer(self.read_buffer.take().unwrap(), BUFFER_SIZE).unwrap();
     }
 }
 

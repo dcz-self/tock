@@ -468,7 +468,7 @@ pub unsafe fn main() {
         index: hil::block_storage::BlockIndex(43),
         length_blocks: 1,
     };
-    dbg!(flash.erase(&region));
+    //dbg!(flash.erase(&region));
     
     let rng = components::rng::RngComponent::new(
         board_kernel,
