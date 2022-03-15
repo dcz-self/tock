@@ -101,7 +101,7 @@ struct State {
 /// Requires a buffer of size at least `W`.
 ///
 /// `W` is the size of a write block, `E` is the erase block size.
-pub struct BlockStorage<'a, T, const W: u32, const E: u32>
+pub struct BlockStorage<'a, T, const W: usize, const E: usize>
 where
     T: hil::block_storage::BlockStorage<W, E>,
 {
@@ -118,7 +118,7 @@ where
     buffer: TakeCell<'static, [u8]>,
 }
 
-impl<T, const W: u32, const E: u32> BlockStorage<'static, T, W, E>
+impl<T, const W: usize, const E: usize> BlockStorage<'static, T, W, E>
 where
     T: hil::block_storage::BlockStorage<W, E>,
 {
@@ -168,7 +168,7 @@ where
     }
 }
 
-impl<T, const W: u32, const E: u32> hil::block_storage::Client<W, E> for BlockStorage<'_, T, W, E>
+impl<T, const W: usize, const E: usize> hil::block_storage::Client<W, E> for BlockStorage<'_, T, W, E>
 where
     T: hil::block_storage::BlockStorage<W, E>,
 {
@@ -229,7 +229,7 @@ where
     fn erase_complete(&self, ret: Result<(), ErrorCode>) {}
 }
 
-impl<T, const W: u32, const E: u32> SyscallDriver for BlockStorage<'static, T, W, E>
+impl<T, const W: usize, const E: usize> SyscallDriver for BlockStorage<'static, T, W, E>
 where
     T: hil::block_storage::BlockStorage<W, E>,
 {
@@ -249,7 +249,7 @@ where
                     .map_or_else(CommandReturn::failure, CommandReturn::success_u64)
             },
             Ok(Command::GEOMETRY) => {
-                CommandReturn::success_u32_u32(W, E)
+                CommandReturn::success_u32_u32(W as u32, E as u32)
             },
             Ok(Command::READ_RANGE) => {
                 CommandReturn::failure(ErrorCode::NOSUPPORT)

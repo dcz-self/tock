@@ -63,7 +63,7 @@ pub static mut TXBUFFER: [u8; PAGE_SIZE as usize + 4] = [0; PAGE_SIZE as usize +
 pub static mut RXBUFFER: [u8; PAGE_SIZE as usize + 4] = [0; PAGE_SIZE as usize + 4];
 
 const SPI_SPEED: u32 = 8000000;
-pub const SECTOR_SIZE: u32 = 4096;
+pub const SECTOR_SIZE: usize = 4096;
 const PAGE_SIZE: u32 = 256;
 
 // TODO: remove alias
@@ -253,9 +253,9 @@ impl<
                             .map_or(Err(ErrorCode::RESERVE), move |rxbuffer| {
                                 // Setup the read instruction
                                 txbuffer[0] = Opcodes::READ as u8;
-                                txbuffer[1] = ((sector_index * SECTOR_SIZE) >> 16) as u8;
-                                txbuffer[2] = ((sector_index * SECTOR_SIZE) >> 8) as u8;
-                                txbuffer[3] = ((sector_index * SECTOR_SIZE) >> 0) as u8;
+                                txbuffer[1] = ((sector_index * SECTOR_SIZE as u32) >> 16) as u8;
+                                txbuffer[2] = ((sector_index * SECTOR_SIZE as u32) >> 8) as u8;
+                                txbuffer[3] = ((sector_index * SECTOR_SIZE as u32) >> 0) as u8;
 
                                 // Call the SPI driver to kick things off.
                                 self.state.set(State::ReadSector {
@@ -351,7 +351,7 @@ impl<
                             sector[i + (page_index * PAGE_SIZE) as usize] = read_buffer[i + 4];
                         }
 
-                        if (page_index + 1) * PAGE_SIZE == SECTOR_SIZE {
+                        if (page_index + 1) * PAGE_SIZE == SECTOR_SIZE as u32 {
                             // Done reading
                             self.state.set(State::Idle);
                             self.txbuffer.replace(write_buffer);
@@ -362,7 +362,7 @@ impl<
                             });
                         } else {
                             let address =
-                                (sector_index * SECTOR_SIZE) + ((page_index + 1) * PAGE_SIZE);
+                                (sector_index * SECTOR_SIZE as u32) + ((page_index + 1) * PAGE_SIZE);
                             write_buffer[0] = Opcodes::READ as u8;
                             write_buffer[1] = (address >> 16) as u8;
                             write_buffer[2] = (address >> 8) as u8;
@@ -389,9 +389,9 @@ impl<
             } => {
                 self.state.set(State::EraseSectorErase { operation });
                 write_buffer[0] = Opcodes::SE as u8;
-                write_buffer[1] = ((sector_index * SECTOR_SIZE) >> 16) as u8;
-                write_buffer[2] = ((sector_index * SECTOR_SIZE) >> 8) as u8;
-                write_buffer[3] = ((sector_index * SECTOR_SIZE) >> 0) as u8;
+                write_buffer[1] = ((sector_index * SECTOR_SIZE as u32) >> 16) as u8;
+                write_buffer[2] = ((sector_index * SECTOR_SIZE as u32) >> 8) as u8;
+                write_buffer[3] = ((sector_index * SECTOR_SIZE as u32) >> 0) as u8;
 
                 // TODO verify SPI return value
                 let _ = self.spi.read_write_bytes(write_buffer, None, 4);
@@ -443,7 +443,7 @@ impl<
             } => {
                 // Check if we are done. This happens when we have written a
                 // sector's worth of data, one page at a time.
-                if page_index * PAGE_SIZE == SECTOR_SIZE {
+                if page_index * PAGE_SIZE == SECTOR_SIZE as u32 {
                     // No need to disable writes since it happens automatically.
                     self.state.set(State::Idle);
                     self.txbuffer.replace(write_buffer);
@@ -472,7 +472,7 @@ impl<
                     sector_index,
                     page_index: page_index + 1,
                 });
-                let address = (sector_index * SECTOR_SIZE) + (page_index * PAGE_SIZE);
+                let address = (sector_index * SECTOR_SIZE as u32) + (page_index * PAGE_SIZE);
                 write_buffer[0] = Opcodes::PP as u8;
                 write_buffer[1] = (address >> 16) as u8;
                 write_buffer[2] = (address >> 8) as u8;

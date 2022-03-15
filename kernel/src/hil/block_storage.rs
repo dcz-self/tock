@@ -9,7 +9,7 @@
 //! use kernel::ErrorCode;
 //!
 //! const WRITE_BLOCK_BYTES: u32 = 256;
-//! const ERASE_BLOCK_BYTES: u32 = 4096;
+//! const ERASE_BLOCK_BYTES: usize = 4096;
 //!
 //! struct RawFlashChip {};
 //!
@@ -27,7 +27,7 @@
 //! use kernel::hil;
 //! use kernel::ErrorCode;
 //!
-//! const BLOCK_BYTES: u32 = 4096;
+//! const BLOCK_BYTES: usize = 4096;
 //!
 //! struct SimpleBlockDevice {};
 //!
@@ -47,9 +47,9 @@ use crate::ErrorCode;
 
 /// An index to a block within device composed of `S`-sized blocks.
 #[derive(Clone, Copy)]
-pub struct BlockIndex<const S: u32>(pub u32);
+pub struct BlockIndex<const S: usize>(pub u32);
 
-impl<const S: u32> BlockIndex<S> {
+impl<const S: usize> BlockIndex<S> {
     /// Returns the index that contains the address.
     pub fn new_containing(address: u64) -> Self {
         Self((address / S as u64) as u32)
@@ -65,7 +65,7 @@ impl<const S: u32> BlockIndex<S> {
     }
 }
 
-impl<const S: u32> From<BlockIndex<S>> for u64 {
+impl<const S: usize> From<BlockIndex<S>> for u64 {
     fn from(index: BlockIndex<S>) -> Self {
         index.0 as u64 * S as u64
     }
@@ -73,7 +73,7 @@ impl<const S: u32> From<BlockIndex<S>> for u64 {
 
 /// A memory region composed of consecutive `S`-sized blocks.
 #[derive(Clone, Copy)]
-pub struct Region<const S: u32> {
+pub struct Region<const S: usize> {
     pub index: BlockIndex<S>,
     pub length_blocks: u32,
 }
@@ -83,7 +83,7 @@ fn div_ceil(a: u64, b: u64) -> u64 {
     a / b // FIXME: trololo
 }
 
-impl<const S: u32> Region<S> {
+impl<const S: usize> Region<S> {
     /// Returns the smallest region made of blocks which contains
     /// the specified range of addresses.
     pub fn new_containing(range: AddressRange) -> Self {
@@ -104,10 +104,10 @@ impl<const S: u32> Region<S> {
     /// as the given `range`, if such exists.
     pub fn new_exact(range: AddressRange) -> Option<Self> {
         BlockIndex::new_starting_at(range.start_address).and_then(|index| {
-            if range.length_bytes % S == 0 {
+            if range.length_bytes % S as u32 == 0 {
                 Some(Self {
                     index,
-                    length_blocks: range.length_bytes / S,
+                    length_blocks: range.length_bytes / S as u32,
                 })
             } else {
                 None
@@ -116,7 +116,7 @@ impl<const S: u32> Region<S> {
     }
 
     pub fn get_length_bytes(&self) -> u32 {
-        self.length_blocks * S
+        self.length_blocks * S as u32
     }
 }
 
@@ -134,7 +134,7 @@ impl AddressRange {
     }
 }
 
-impl<const S: u32> From<Region<S>> for AddressRange {
+impl<const S: usize> From<Region<S>> for AddressRange {
     fn from(region: Region<S>) -> Self {
         let length_bytes = region.get_length_bytes();
         Self {
@@ -159,7 +159,7 @@ impl<const S: u32> From<Region<S>> for AddressRange {
 ///
 /// `W`: The size of a write block in bytes.
 /// `E`: The size of an erase block in bytes.
-pub trait BlockStorage<const W: u32, const E: u32> {
+pub trait BlockStorage<const W: usize, const E: usize> {
     /// Read data from flash into a buffer.
     ///
     /// This function will read data stored in flash at `range` into `buf`.
@@ -250,7 +250,7 @@ pub trait HasClient<'a, C> {
 }
 
 /// Implement `Client` to receive callbacks from `BlockStorage`.
-pub trait Client<const W: u32, const E: u32> {
+pub trait Client<const W: usize, const E: usize> {
     /// Block read complete.
     ///
     /// This will be called when the read operation is complete.
