@@ -27,8 +27,8 @@ macro_rules! block_storage_component_helper {
         use capsules::block_storage_driver::BlockStorage;
         use core::mem::MaybeUninit;
         use kernel::hil;
-        static mut BUF1: MaybeUninit<[u8; W]> = MaybeUninit::uninit();
-        static mut BUF2: MaybeUninit<[u8; W]> = MaybeUninit::uninit();
+        static mut BUF1: MaybeUninit<[u8; W as usize]> = MaybeUninit::uninit();
+        static mut BUF2: MaybeUninit<[u8; W as usize]> = MaybeUninit::uninit();
         (&mut BUF1, &mut BUF2)
     };};
 }
@@ -52,8 +52,8 @@ impl<B, const W: u32, const E: u32> Component for BlockStorageComponent<B, W, E>
         >,
 {
     type StaticInput = (
-        &'static mut MaybeUninit<[u8; W]>,
-        &'static mut MaybeUninit<[u8; W]>,
+        &'static mut MaybeUninit<[u8; W as usize]>,
+        &'static mut MaybeUninit<[u8; W as usize]>,
     );
     type Output = &'static block_storage_driver::BlockStorage<'static, B, W, E>;
 
@@ -62,17 +62,20 @@ impl<B, const W: u32, const E: u32> Component for BlockStorageComponent<B, W, E>
 
         let read_buffer = static_init_half!(
             static_buffer.0,
-            [u8; W],
-            [0; W],
+            [u8; W as usize],
+            [0; W as usize],
         );
 
         let write_buffer = static_init_half!(
             static_buffer.1,
-            [u8; W],
-            [0; W],
+            [u8; W as usize],
+            [0; W as usize],
         );
         
-        let syscall_driver = static_init!(
+        let mut u: MaybeUninit<block_storage_driver::BlockStorage<'static, B, W, E>> = MaybeUninit::uninit();
+        
+        let syscall_driver = static_init_half!(
+            &mut u,
             block_storage_driver::BlockStorage<'static, B, W, E>,
             block_storage_driver::BlockStorage::new(
                 self.device,

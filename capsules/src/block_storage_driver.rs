@@ -122,7 +122,7 @@ impl<T, const W: u32, const E: u32> BlockStorage<'static, T, W, E>
 where
     T: hil::block_storage::BlockStorage<W, E>,
 {
-    fn new(
+    pub fn new(
         device: &'static T,
         grant: Grant<
             (),
