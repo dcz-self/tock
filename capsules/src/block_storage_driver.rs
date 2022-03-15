@@ -118,19 +118,19 @@ where
     buffer: TakeCell<'static, [u8]>,
 }
 
-impl<T, const W: u32, const E: u32> BlockStorage<'_, T, W, E>
+impl<T, const W: u32, const E: u32> BlockStorage<'static, T, W, E>
 where
     T: hil::block_storage::BlockStorage<W, E>,
 {
     fn new(
-        device: &T,
+        device: &'static T,
         grant: Grant<
             (),
             UpcallCount<UPCALL_COUNT>,
             AllowRoCount<{ ro_allow::COUNT }>,
-            AllowRwCount<0>,
+            AllowRwCount<{ rw_allow::COUNT }>,
         >,
-        buffer: &'static [u8],
+        buffer: &'static mut [u8],
     ) -> Self {
         Self {
             device,
@@ -229,7 +229,7 @@ where
     fn erase_complete(&self, ret: Result<(), ErrorCode>) {}
 }
 
-impl<T, const W: u32, const E: u32> SyscallDriver for BlockStorage<'_, T, W, E>
+impl<T, const W: u32, const E: u32> SyscallDriver for BlockStorage<'static, T, W, E>
 where
     T: hil::block_storage::BlockStorage<W, E>,
 {

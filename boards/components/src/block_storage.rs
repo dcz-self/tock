@@ -43,10 +43,11 @@ pub struct BlockStorageComponent<B, const W: u32, const E: u32>
     pub device: &'static B,
 }
 
-impl<B, const W: u32, const E: u32> Component for NonvolatileStorageComponent<B>
+impl<B, const W: u32, const E: u32> Component for BlockStorageComponent<B, W, E>
     where B: 'static
         + hil::block_storage::BlockStorage<W, E>
         + hil::block_storage::HasClient<
+            'static,
             block_storage_driver::BlockStorage<'static, B, W, E>
         >,
 {
