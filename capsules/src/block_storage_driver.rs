@@ -21,9 +21,8 @@ use kernel::syscall::{CommandReturn, SyscallDriver};
 use kernel::utilities::cells::TakeCell;
 use kernel::{ErrorCode, ProcessId};
 
-/// Syscall driver number.
 use crate::driver;
-pub const DRIVER_NUM: usize = driver::NUM::NvmStorage as usize;
+pub const DRIVER_NUM: usize = driver::NUM::BlockStorage as usize;
 
 enum Command {
     CHECK = 0,
@@ -80,7 +79,7 @@ enum Upcall {
 
 const UPCALL_COUNT: usize = 3;
 
-pub static mut BUFFER: [u8; 512] = [0; 512];
+//pub static mut BUFFER: [u8; 512] = [0; 512];
 
 #[derive(Clone, Copy)]
 enum Read {
@@ -123,6 +122,24 @@ impl<T, const W: u32, const E: u32> BlockStorage<'_, T, W, E>
 where
     T: hil::block_storage::BlockStorage<W, E>,
 {
+    fn new(
+        device: &T,
+        grant: Grant<
+            (),
+            UpcallCount<UPCALL_COUNT>,
+            AllowRoCount<{ ro_allow::COUNT }>,
+            AllowRwCount<0>,
+        >,
+        buffer: &'static [u8],
+    ) -> Self {
+        Self {
+            device,
+            apps: grant,
+            state: Cell::new(State { read: Read::None }),
+            buffer: TakeCell::new(buffer),
+        }
+    }
+
     fn start_read(&self, region: &Region<W>, appid: ProcessId)
         -> Result<(), ErrorCode>
     {

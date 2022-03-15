@@ -16,6 +16,7 @@ use components::bmp280_component_helper;
 use components::bmp280::Bmp280Component;
 use kernel::component::Component;
 use kernel::dynamic_deferred_call::{DynamicDeferredCall, DynamicDeferredCallClientState};
+use kernel::hil;
 use kernel::hil::sensors::{TemperatureClient, TemperatureDriver};
 use kernel::hil::i2c::I2CMaster;
 use kernel::hil::led::LedHigh;
