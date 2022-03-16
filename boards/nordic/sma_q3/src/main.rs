@@ -10,6 +10,7 @@
 #![deny(missing_docs)]
 
 use capsules::bmp280::Bmp280;
+use capsules::mx25r6435f;
 use capsules::virtual_aes_ccm::MuxAES128CCM;
 use capsules::virtual_alarm::VirtualMuxAlarm;
 use components::bmp280_component_helper;
@@ -82,6 +83,17 @@ pub struct Platform {
         nrf52840::ble_radio::Radio<'static>,
         VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>,
     >,
+    block_storage: &'static capsules::block_storage_driver::BlockStorage<
+        'static,
+        mx25r6435f::MX25R6435F<
+            'static,
+            capsules::virtual_spi::VirtualSpiMasterDevice<'static, nrf52840::spi::SPIM>,
+            nrf52840::gpio::GPIOPin<'static>,
+            VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>
+        >,
+        4096,
+        4096,
+    >,
     ieee802154_radio: &'static capsules::ieee802154::RadioDriver<'static>,
     button: &'static capsules::button::Button<'static, nrf52840::gpio::GPIOPin<'static>>,
     pconsole: &'static capsules::process_console::ProcessConsole<
@@ -97,7 +109,6 @@ pub struct Platform {
         2,
     >,
     rng: &'static capsules::rng::RngDriver<'static>,
-    //temp: &'static capsules::temperature::TemperatureSensor<'static>,
     ipc: kernel::ipc::IPC<NUM_PROCS>,
     analog_comparator: &'static capsules::analog_comparator::AnalogComparator<
         'static,
@@ -127,6 +138,7 @@ impl SyscallDriverLookup for Platform {
             capsules::ieee802154::DRIVER_NUM => f(Some(self.ieee802154_radio)),
             capsules::temperature::DRIVER_NUM => f(Some(self.temperature)),
             capsules::analog_comparator::DRIVER_NUM => f(Some(self.analog_comparator)),
+            capsules::block_storage_driver::DRIVER_NUM => f(Some(self.block_storage)),
             kernel::ipc::DRIVER_NUM => f(Some(&self.ipc)),
             _ => f(None),
         }
@@ -416,7 +428,6 @@ pub unsafe fn main() {
         ))
     };
     
-    use capsules::mx25r6435f;
     use kernel::hil;
     use kernel::hil::block_storage::HasClient;
 
@@ -537,6 +548,7 @@ pub unsafe fn main() {
         temperature,
         button,
         ble_radio,
+        block_storage: block_storage_driver,
         ieee802154_radio,
         pconsole,
         console,
