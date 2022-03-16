@@ -9,7 +9,7 @@
 //! let block_storage = components::block_storage::BlockStorageComponent::new(
 //!     &flash_device,
 //! )
-//! .finalize(components::nv_storage_component_helper!());
+//! .finalize(components::block_storage_component_helper!());
 //! ```
 
 use capsules::block_storage_driver;
@@ -24,14 +24,15 @@ use kernel::{static_init, static_init_half};
 // Setup static space for the objects.
 #[macro_export]
 macro_rules! block_storage_component_helper {
-    () => {{
+    ($B:ty, $W: literal, $E: literal $(,)?) => {{
         use capsules::block_storage_driver::BlockStorage;
         use core::mem::MaybeUninit;
         use kernel::hil;
-        static mut BUF1: MaybeUninit<[u8; W]> = MaybeUninit::uninit();
-        static mut BUF2: MaybeUninit<[u8; W]> = MaybeUninit::uninit();
-        static mut BUF2: MaybeUninit<block_storage_driver::BlockStorage<'static, B, W, E>> = MaybeUninit::uninit();
-        (&mut BUF1, &mut BUF2 &mut BUF3)
+        static mut BUF1: MaybeUninit<[u8; $W]> = MaybeUninit::uninit();
+        static mut BUF2: MaybeUninit<[u8; $W]> = MaybeUninit::uninit();
+        static mut BUF3: MaybeUninit<BlockStorage<'static, $B, $W, $E>>
+            = MaybeUninit::uninit();
+        (&mut BUF1, &mut BUF2, &mut BUF3)
     };};
 }
 

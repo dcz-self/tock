@@ -10,17 +10,15 @@ use crate::dbg;
 
 pub const BUFFER_SIZE: usize = 64;
 
-pub struct Gnss<'a, T, F>{
+pub struct Gnss<'a, T>{
     uart: &'a T,
     read_buffer: TakeCell<'static, [u8]>,
-    flash: &'a F,
 }
 
-impl<'a, 'b: 'a, T: uart::Receive<'a>, F> Gnss<'b, T, F> where Self: 'a {
-    pub fn new(uart: &'b T, flash: &'b F, buffer: &'static mut [u8]) -> Self {
+impl<'a, 'b: 'a, T: uart::Receive<'a>> Gnss<'b, T> where Self: 'a {
+    pub fn new(uart: &'b T, buffer: &'static mut [u8]) -> Self {
         Self {
             uart,
-            flash,
             read_buffer: TakeCell::new(buffer),
         }
     }
@@ -29,7 +27,7 @@ impl<'a, 'b: 'a, T: uart::Receive<'a>, F> Gnss<'b, T, F> where Self: 'a {
     }
 }
 
-impl<'a, T: uart::Receive<'a>, F> uart::ReceiveClient for Gnss<'_, T, F> where Self: 'a {
+impl<'a, T: uart::Receive<'a>> uart::ReceiveClient for Gnss<'_, T> where Self: 'a {
     fn received_buffer(
         &self,
         buffer: &'static mut [u8],
@@ -41,34 +39,5 @@ impl<'a, T: uart::Receive<'a>, F> uart::ReceiveClient for Gnss<'_, T, F> where S
 
         self.read_buffer.replace(buffer);
         self.start_receive();
-    }
-}
-
-impl<'a, T, F: hil::block_storage::BlockStorage<4096, 4096>>
-    hil::block_storage::Client<4096, 4096>
-    for Gnss<'a, T, F>
-{
-    fn read_complete(&self, buffer: &'static mut [u8], error: Result<(), ErrorCode>) {
-        dbg!("Read");
-        dbg!(&buffer.as_mut()[0..16]);
-    }
-    fn write_complete(&self, buffer: &'static mut [u8], error: Result<(), ErrorCode>) {
-        let region = hil::block_storage::Region::<4096>{
-            index: hil::block_storage::BlockIndex(43),
-            length_blocks: 1,
-        };
-        debug!("written");
-        buffer[0] = 0;
-        dbg!(self.flash.read(&region, buffer));
-    }
-    fn erase_complete(&self, error: Result<(), ErrorCode>) {
-        debug!("erased");
-        let mut buf = self.read_buffer.take().unwrap();
-        buf[0] = 42;
-        let region = hil::block_storage::Region::<4096>{
-            index: hil::block_storage::BlockIndex(43),
-            length_blocks: 1,
-        };
-        dbg!(self.flash.write(&region, buf));
     }
 }
