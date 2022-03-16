@@ -10,7 +10,7 @@ enum Order {
 }
 
 pub trait Callable {
-    fn next(&mut self);
+    fn next(&mut self) -> bool;
 }
 
 
@@ -28,15 +28,16 @@ impl<'a, A: hil::time::Alarm<'a>, F> Periodic<'a, A, F> {
     }
 
     pub fn arm(&self) {
-        let delay = self.alarm.ticks_from_ms(1000);
+        let delay = self.alarm.ticks_from_ms(2000);
         self.alarm.set_alarm(self.alarm.now(), delay);
     }
 }
 
 impl<'a, A: hil::time::Alarm<'a>, F: Callable> hil::time::AlarmClient for Periodic<'a, A, F> {
     fn alarm(&self) {
-        self.arm();
         let mut f = self.f.borrow_mut();
-        f.next();
+        if f.next() {
+            self.arm();
+        }
     }
 }

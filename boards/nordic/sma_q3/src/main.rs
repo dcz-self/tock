@@ -475,7 +475,7 @@ pub unsafe fn main() {
             gnss::Gnss::new(&base_peripherals.uarte0, &mut BUFFER),
         );
         base_peripherals.uarte0.set_receive_client(gnss);
-        gnss.start_receive();
+        //gnss.start_receive();
         
         use kernel::hil::gpio::Configure as _;
         use kernel::hil::gpio::Output;
@@ -521,11 +521,11 @@ pub unsafe fn main() {
     use kernel::hil::time::Alarm;
     
     struct Print(&'static Bmp280<'static, VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>>);
-    impl periodic::Callable for Print {
+    /*impl periodic::Callable for Print {
         fn next(&mut self) {
             //debug!("read request: {:?}", self.0.read_temperature());
         }
-    }
+    }*/
     
     struct TempCelsius;
     impl TemperatureClient for TempCelsius {
@@ -541,7 +541,7 @@ pub unsafe fn main() {
     );
     
     
-    periodic_virtual_alarm.set_alarm_client(periodic);
+    //periodic_virtual_alarm.set_alarm_client(periodic);
     periodic.arm();
     bmp280.begin_reset().unwrap();
     let platform = Platform {
@@ -571,6 +571,57 @@ pub unsafe fn main() {
     debug!("Initialization complete. Entering main loop\r");
     debug!("{}", &nrf52840::ficr::FICR_INSTANCE);
 
+    // When a process crashes during loading, it usually isn't caught by RTT.
+    // This delays process loading so that it can be caught.
+    struct Apps {
+        board_kernel: &'static kernel::Kernel,
+        chip: &'static nrf52840::chip::NRF52<'static, Nrf52840DefaultPeripherals<'static>>,
+    }
+    
+    impl periodic::Callable for Apps{
+        fn next(&mut self) -> bool {
+            debug!("process load");
+            let process_management_capability =
+        create_capability!(capabilities::ProcessManagementCapability);
+            unsafe {
+            kernel::process::load_processes(
+                self.board_kernel,
+                self.chip,
+                core::slice::from_raw_parts(
+                    &_sapps as *const u8,
+                    &_eapps as *const u8 as usize - &_sapps as *const u8 as usize,
+                ),
+                core::slice::from_raw_parts_mut(
+                    &mut _sappmem as *mut u8,
+                    &_eappmem as *const u8 as usize - &_sappmem as *const u8 as usize,
+                ),
+                &mut PROCESSES,
+                &FAULT_RESPONSE,
+                &process_management_capability,
+            )
+            .unwrap_or_else(|err| {
+                debug!("Error loading processes!");
+                debug!("{:?}", err);
+            });
+            }
+            false
+        }
+    };
+    
+    let periodic = static_init!(
+        periodic::Periodic<'static, VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>, Apps>,
+        periodic::Periodic::new(
+            periodic_virtual_alarm, 
+            Apps{
+                board_kernel,
+                chip,
+            },
+        ),
+    );
+    
+    periodic_virtual_alarm.set_alarm_client(periodic);
+
+    periodic.arm();
     /// These symbols are defined in the linker script.
     extern "C" {
         /// Beginning of the ROM region containing app images.
@@ -582,26 +633,6 @@ pub unsafe fn main() {
         /// End of the RAM region for app memory.
         static _eappmem: u8;
     }
-
-    kernel::process::load_processes(
-        board_kernel,
-        chip,
-        core::slice::from_raw_parts(
-            &_sapps as *const u8,
-            &_eapps as *const u8 as usize - &_sapps as *const u8 as usize,
-        ),
-        core::slice::from_raw_parts_mut(
-            &mut _sappmem as *mut u8,
-            &_eappmem as *const u8 as usize - &_sappmem as *const u8 as usize,
-        ),
-        &mut PROCESSES,
-        &FAULT_RESPONSE,
-        &process_management_capability,
-    )
-    .unwrap_or_else(|err| {
-        debug!("Error loading processes!");
-        debug!("{:?}", err);
-    });
 
     board_kernel.kernel_loop(&platform, chip, Some(&platform.ipc), &main_loop_capability);
 }
