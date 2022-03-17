@@ -44,9 +44,10 @@
 //! }
 //! ```
 use crate::ErrorCode;
+use core::ops::Add;
 
 /// An index to a block within device composed of `S`-sized blocks.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct BlockIndex<const S: usize>(pub u32);
 
 impl<const S: usize> BlockIndex<S> {
@@ -71,8 +72,15 @@ impl<const S: usize> From<BlockIndex<S>> for u64 {
     }
 }
 
+impl <const S: usize> Add<u32> for BlockIndex<S> {
+    type Output = Self;
+    fn add(self, other: u32) -> Self {
+        BlockIndex(self.0 + other)
+    }
+}
+
 /// A memory region composed of consecutive `S`-sized blocks.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Region<const S: usize> {
     pub index: BlockIndex<S>,
     pub length_blocks: u32,

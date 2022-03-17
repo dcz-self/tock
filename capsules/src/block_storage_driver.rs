@@ -225,7 +225,6 @@ where
                                 Ok(())
                             },
                             e => e,
-                            //Err((e, b)) => Err((ErrorCode::from(e), b)),  
                         },
                     };
                     ret.map_err(|(e, buf)| {
