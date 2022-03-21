@@ -467,6 +467,7 @@ pub unsafe fn main() {
         }).unwrap();
         static mut BUFFER: [u8; gnss::BUFFER_SIZE] = [0; gnss::BUFFER_SIZE];
 
+        /*
         let gnss: &'static _ = kernel::static_init!(
             gnss::Gnss::<
                 nrf52840::uart::Uarte,
@@ -475,6 +476,13 @@ pub unsafe fn main() {
         );
         base_peripherals.uarte0.set_receive_client(gnss);
         //gnss.start_receive();
+        */
+        
+        let gnss = gnss::finalize(
+            board_kernel,
+            &base_peripherals.uarte0,
+            capsules::driver::NUM::GNSS as usize,
+        );
         
         use kernel::hil::gpio::Configure as _;
         use kernel::hil::gpio::Output;

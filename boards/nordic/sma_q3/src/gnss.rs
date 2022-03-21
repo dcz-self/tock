@@ -41,3 +41,32 @@ impl<'a, T: uart::Receive<'a>> uart::ReceiveClient for Gnss<'_, T> where Self: '
         self.start_receive();
     }
 }
+
+use kernel::{ create_capability, static_init };
+use kernel::capabilities;
+use capsules::console;
+
+static mut WRITE_BUF: [u8; 64] = [0; 64];
+static mut READ_BUF: [u8; 64] = [0; 64];
+
+pub unsafe fn finalize<T: hil::uart::UartData<'static>>(
+    board_kernel: &'static kernel::Kernel,
+    uart: &'static T,
+    driver_num: usize
+) -> &'static console::Console<'static> {
+    let grant_cap = create_capability!(capabilities::MemoryAllocationCapability);
+
+    let driver = static_init!(
+        console::Console<'static>,
+        console::Console::new(
+            uart,
+            &mut WRITE_BUF,
+            &mut READ_BUF,
+            board_kernel.create_grant(driver_num, &grant_cap)
+        )
+    );
+    hil::uart::Transmit::set_transmit_client(uart, driver);
+    hil::uart::Receive::set_receive_client(uart, driver);
+
+    driver
+}
