@@ -9,6 +9,7 @@ use kernel::utilities::cells::TakeCell;
 use crate::dbg;
 
 pub const BUFFER_SIZE: usize = 64;
+pub const DRIVER_NUM: usize = 0x90004;
 
 pub struct Gnss<'a, T>{
     uart: &'a T,

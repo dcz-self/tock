@@ -96,6 +96,7 @@ pub struct Platform {
     >,
     ieee802154_radio: &'static capsules::ieee802154::RadioDriver<'static>,
     button: &'static capsules::button::Button<'static, nrf52840::gpio::GPIOPin<'static>>,
+    gnss: &'static capsules::console::Console<'static>,
     pconsole: &'static capsules::process_console::ProcessConsole<
         'static,
         VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>,
@@ -139,6 +140,7 @@ impl SyscallDriverLookup for Platform {
             capsules::temperature::DRIVER_NUM => f(Some(self.temperature)),
             capsules::analog_comparator::DRIVER_NUM => f(Some(self.analog_comparator)),
             capsules::block_storage_driver::DRIVER_NUM => f(Some(self.block_storage)),
+            gnss::DRIVER_NUM => f(Some(self.gnss)),
             kernel::ipc::DRIVER_NUM => f(Some(&self.ipc)),
             _ => f(None),
         }
@@ -557,6 +559,7 @@ pub unsafe fn main() {
         ble_radio,
         block_storage: block_storage_driver,
         ieee802154_radio,
+        gnss,
         pconsole,
         console,
         led,
