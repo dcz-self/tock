@@ -428,7 +428,6 @@ pub unsafe fn main() {
         ))
     };
     
-    use kernel::hil;
     use kernel::hil::block_storage::HasClient;
 
     let block_storage_driver
