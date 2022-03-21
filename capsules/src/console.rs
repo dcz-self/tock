@@ -48,6 +48,8 @@ use kernel::{ErrorCode, ProcessId};
 use crate::driver;
 pub const DRIVER_NUM: usize = driver::NUM::Console as usize;
 
+pub const BUF_SIZE: usize = 64;
+
 /// Ids for read-only allow buffers
 mod ro_allow {
     pub const WRITE: usize = 1;
@@ -69,9 +71,6 @@ pub struct App {
     pending_write: bool,
     read_len: usize,
 }
-
-pub static mut WRITE_BUF: [u8; 64] = [0; 64];
-pub static mut READ_BUF: [u8; 64] = [0; 64];
 
 pub struct Console<'a> {
     uart: &'a dyn uart::UartData<'a>,

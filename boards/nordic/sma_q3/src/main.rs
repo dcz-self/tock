@@ -325,13 +325,17 @@ pub unsafe fn main() {
         nrf52840::rtc::Rtc<'static>
     ));
 
+    use capsules::virtual_uart::UartDevice;
+
     // Setup the console.
+    let console_uart = static_init!(UartDevice, UartDevice::new(uart_mux, true));
+    console_uart.setup();
     let console = components::console::ConsoleComponent::new(
         board_kernel,
         capsules::console::DRIVER_NUM,
-        uart_mux,
+        console_uart,
     )
-    .finalize(());
+    .finalize(components::console_component_helper!());
     // Create the debugger object that handles calls to `debug!()`.
     components::debug_writer::DebugWriterComponent::new(uart_mux).finalize(());
 
@@ -480,11 +484,11 @@ pub unsafe fn main() {
         //gnss.start_receive();
         */
         
-        let gnss = gnss::finalize(
+        let gnss = components::console::ConsoleComponent::new(
             board_kernel,
-            &base_peripherals.uarte0,
             capsules::driver::NUM::GNSS as usize,
-        );
+            &base_peripherals.uarte0,
+        ).finalize(components::console_component_helper!());
         
         use kernel::hil::gpio::Configure as _;
         use kernel::hil::gpio::Output;

@@ -1,8 +1,8 @@
-//! Board file for SiFive HiFive1b RISC-V development platform.
+//! Board file for SparkFun RedBoard Red-V development platform.
 //!
-//! - <https://www.sifive.com/boards/hifive1-rev-b>
+//! - <https://www.sparkfun.com/products/15594>
 //!
-//! This board file is only compatible with revision B of the HiFive1.
+//! This board is a clone of the Hifive1-revB from SiFive with minor changes.
 
 #![no_std]
 // Disable this attribute when documenting, as a workaround for
@@ -47,11 +47,11 @@ pub static mut STACK_MEMORY: [u8; 0x900] = [0; 0x900];
 
 /// A structure representing this platform that holds references to all
 /// capsules for this platform. We've included an alarm and console.
-struct HiFive1 {
+struct RedV {
     led: &'static capsules::led::LedDriver<
         'static,
         LedLow<'static, sifive::gpio::GpioPin<'static>>,
-        3,
+        1,
     >,
     console: &'static capsules::console::Console<'static>,
     lldb: &'static capsules::low_level_debug::LowLevelDebug<
@@ -68,7 +68,7 @@ struct HiFive1 {
 }
 
 /// Mapping of integer syscalls to objects that implement syscalls.
-impl SyscallDriverLookup for HiFive1 {
+impl SyscallDriverLookup for RedV {
     fn with_driver<F, R>(&self, driver_num: usize, f: F) -> R
     where
         F: FnOnce(Option<&dyn kernel::syscall::SyscallDriver>) -> R,
@@ -83,7 +83,7 @@ impl SyscallDriverLookup for HiFive1 {
     }
 }
 
-impl KernelResources<e310x::chip::E310x<'static, E310xDefaultPeripherals<'static>>> for HiFive1 {
+impl KernelResources<e310x::chip::E310x<'static, E310xDefaultPeripherals<'static>>> for RedV {
     type SyscallDriverLookup = Self;
     type SyscallFilter = ();
     type ProcessFault = ();
@@ -155,7 +155,7 @@ pub unsafe fn main() {
 
     // Configure kernel debug gpios as early as possible
     kernel::debug::assign_gpios(
-        Some(&peripherals.gpio_port[22]), // Red
+        Some(&peripherals.gpio_port[5]), // Blue/only LED
         None,
         None,
     );
@@ -171,9 +171,7 @@ pub unsafe fn main() {
     // LEDs
     let led = components::led::LedsComponent::new().finalize(components::led_component_helper!(
         LedLow<'static, sifive::gpio::GpioPin>,
-        LedLow::new(&peripherals.gpio_port[22]), // Red
-        LedLow::new(&peripherals.gpio_port[19]), // Green
-        LedLow::new(&peripherals.gpio_port[21]), // Blue
+        LedLow::new(&peripherals.gpio_port[5]), // Blue
     ));
 
     peripherals
@@ -198,8 +196,6 @@ pub unsafe fn main() {
         VirtualMuxAlarm<'static, sifive::clint::Clint>,
         VirtualMuxAlarm::new(mux_alarm)
     );
-    virtual_alarm_user.setup();
-
     let systick_virtual_alarm = static_init!(
         VirtualMuxAlarm<'static, sifive::clint::Clint>,
         VirtualMuxAlarm::new(mux_alarm)
@@ -253,7 +249,7 @@ pub unsafe fn main() {
 
     // Need two debug!() calls to actually test with QEMU. QEMU seems to have
     // a much larger UART TX buffer (or it transmits faster).
-    debug!("HiFive1 initialization complete.");
+    debug!("Red-V initialization complete.");
     debug!("Entering main loop.");
 
     /// These symbols are defined in the linker script.
@@ -276,7 +272,7 @@ pub unsafe fn main() {
         VirtualSchedulerTimer::new(systick_virtual_alarm)
     );
 
-    let hifive1 = HiFive1 {
+    let redv = RedV {
         console: console,
         alarm: alarm,
         lldb: lldb,
@@ -306,7 +302,7 @@ pub unsafe fn main() {
     });
 
     board_kernel.kernel_loop(
-        &hifive1,
+        &redv,
         chip,
         None::<&kernel::ipc::IPC<NUM_PROCS>>,
         &main_loop_cap,
