@@ -1385,6 +1385,7 @@ impl<C: 'static + Chip> ProcessStandard<'_, C> {
         // Right now, we only support skipping some RAM and leaving a chunk
         // unused so that the memory region starts where the process needs it
         // to.
+        /*
         let remaining_memory = if let Some(fixed_memory_start) = tbf_header.get_fixed_address_ram()
         {
             // The process does have a fixed address.
@@ -1423,12 +1424,17 @@ impl<C: 'static + Chip> ProcessStandard<'_, C> {
         } else {
             remaining_memory
         };
-
+        */
+debug!("rem {:?}", remaining_memory.as_ptr() as *const u8);
+debug!("mto {}", min_total_memory_size);
+debug!("mp {}", min_process_memory_size);
+debug!("ikm {}", initial_kernel_memory_size);
         // Determine where process memory will go and allocate MPU region for
         // app-owned memory.
-        let (app_memory_start, app_memory_size) = match chip.mpu().allocate_app_memory_region(
+        let (app_region_start, app_region_size) = match chip.mpu().allocate_app_memory_region(
             remaining_memory.as_ptr() as *const u8,
             remaining_memory.len(),
+            tbf_header.get_fixed_address_ram().map(|a| a as *const u8),
             min_total_memory_size,
             min_process_memory_size,
             initial_kernel_memory_size,
@@ -1438,7 +1444,8 @@ impl<C: 'static + Chip> ProcessStandard<'_, C> {
             Some((memory_start, memory_size)) => (memory_start, memory_size),
             None => {
                 // Failed to load process. Insufficient memory.
-                if config::CONFIG.debug_load_processes {
+        //        if config::CONFIG.debug_load_processes {
+        {
                     debug!(
                         "[!] flash={:#010X}-{:#010X} process={:?} - couldn't allocate memory region of size >= {:#X}",
                         app_flash.as_ptr() as usize,
@@ -1451,21 +1458,33 @@ impl<C: 'static + Chip> ProcessStandard<'_, C> {
             }
         };
 
+        debug!("appreg {:?}",  (app_region_start, app_region_size));
         // Get a slice for the memory dedicated to the process. This can fail if
         // the MPU returns a region of memory that is not inside of the
         // `remaining_memory` slice passed to `create()` to allocate the
         // process's memory out of.
+        let (app_memory_start, app_memory_size)
+            = match tbf_header.get_fixed_address_ram() {
+                Some(start) => (
+                    start as *const u8,
+                    app_region_start as usize + app_region_size - start as usize,
+                ),
+                None => (app_region_start, app_region_size),
+            };
+        debug!("appmem {:?}",  (app_memory_start, app_memory_size));
         let memory_start_offset = app_memory_start as usize - remaining_memory.as_ptr() as usize;
         // First split the remaining memory into a slice that contains the
         // process memory and a slice that will not be used by this process.
         let (app_memory_oversize, unused_memory) =
             remaining_memory.split_at_mut(memory_start_offset + app_memory_size);
+        debug!("mso 0x{:x} {:?}, {}",  memory_start_offset,  (app_memory_oversize.as_ptr() as *const u8, unused_memory.as_ptr() as *const u8), &app_memory_oversize.len());
         // Then since the process's memory need not start at the beginning of
         // the remaining slice given to create(), get a smaller slice as needed.
         let app_memory = app_memory_oversize
             .get_mut(memory_start_offset..)
             .ok_or(ProcessLoadError::InternalError)?;
-
+debug!("...");
+        return Err(ProcessLoadError::InternalError);
         // Check if the memory region is valid for the process. If a process
         // included a fixed address for the start of RAM in its TBF header (this
         // field is optional, processes that are position independent do not
@@ -1722,6 +1741,7 @@ impl<C: 'static + Chip> ProcessStandard<'_, C> {
         let app_mpu_mem = self.chip.mpu().allocate_app_memory_region(
             self.mem_start(),
             self.memory_len,
+            self.header.get_fixed_address_ram().map(|a| a as *const u8),
             self.memory_len, //we want exactly as much as we had before restart
             min_process_memory_size,
             initial_kernel_memory_size,

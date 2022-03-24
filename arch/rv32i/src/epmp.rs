@@ -537,6 +537,7 @@ impl<const MAX_AVAILABLE_REGIONS_OVER_TWO: usize> kernel::platform::mpu::MPU
         &self,
         unallocated_memory_start: *const u8,
         unallocated_memory_size: usize,
+        app_memory_start: Option<usize>,
         min_memory_size: usize,
         initial_app_memory_size: usize,
         initial_kernel_memory_size: usize,
