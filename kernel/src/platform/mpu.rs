@@ -231,10 +231,12 @@ pub trait MPU {
             min_memory_size,
             initial_app_memory_size + initial_kernel_memory_size,
         );
-        let start = app_memory_start
-            .map(|start| cmp::max(start, unallocated_memory_start))
-            .unwrap_or(unallocated_memory_start);
-        if start as usize + memory_size > unallocated_memory_start as usize + unallocated_memory_size {
+        let start = app_memory_start.map_or(unallocated_memory_start, |start| {
+            cmp::max(start, unallocated_memory_start)
+        });
+        if start as usize + memory_size
+            > unallocated_memory_start as usize + unallocated_memory_size
+        {
             None
         } else {
             Some((start, memory_size))

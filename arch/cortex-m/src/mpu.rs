@@ -588,25 +588,23 @@ impl<const NUM_REGIONS: usize, const MIN_REGION_SIZE: usize> mpu::MPU
                 let start = start as usize;
                 let region_start = start - start % region_size;
                 let app_end = start + memory_size;
-                let region_size
-                    = if region_start + region_size < app_end {
-                        region_size * 2
-                    } else {
-                        region_size
-                    };
+                let region_size = if region_start + region_size < app_end {
+                    region_size * 2
+                } else {
+                    region_size
+                };
                 (region_start, region_size)
-            },
+            }
             None => {
                 // The region should start as close as possible to the start of the unallocated memory.
                 let start = unallocated_memory_start as usize;
-                let region_start
-                    = if start % region_size != 0 {
-                        start + region_size - (start % region_size)
-                    } else {
-                        start
-                    };
+                let region_start = if start % region_size != 0 {
+                    start + region_size - (start % region_size)
+                } else {
+                    start
+                };
                 (region_start, region_size)
-            },
+            }
         };
         kernel::debug!("0x{:x} 0x{:x}", region_start, region_size);
         // We allocate an MPU region starting before or exactly
@@ -642,12 +640,12 @@ impl<const NUM_REGIONS: usize, const MIN_REGION_SIZE: usize> mpu::MPU
                 Some(start) => {
                     let start = start as usize;
                     region_start = start - start % region_size;
-                },
+                }
                 None => {
                     if region_start % region_size != 0 {
                         region_start += region_size - (region_start % region_size);
                     }
-                },
+                }
             };
 
             num_subregions_used = {
