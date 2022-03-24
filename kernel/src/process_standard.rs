@@ -1385,7 +1385,7 @@ impl<C: 'static + Chip> ProcessStandard<'_, C> {
         // Right now, we only support skipping some RAM and leaving a chunk
         // unused so that the memory region starts where the process needs it
         // to.
-        
+        /*
         let remaining_memory = if let Some(fixed_memory_start) = tbf_header.get_fixed_address_ram()
         {
             // The process does have a fixed address.
@@ -1423,7 +1423,7 @@ impl<C: 'static + Chip> ProcessStandard<'_, C> {
             }
         } else {
             remaining_memory
-        };
+        };*/
         
 debug!("rem {:?}", remaining_memory.as_ptr() as *const u8);
 debug!("mto {}", min_total_memory_size);
@@ -1434,8 +1434,8 @@ debug!("ikm {}", initial_kernel_memory_size);
         let (app_region_start, app_region_size) = match chip.mpu().allocate_app_memory_region(
             remaining_memory.as_ptr() as *const u8,
             remaining_memory.len(),
-            //tbf_header.get_fixed_address_ram().map(|a| a as *const u8),
-            None,
+            tbf_header.get_fixed_address_ram().map(|a| a as *const u8),
+            //None,
             min_total_memory_size,
             min_process_memory_size,
             initial_kernel_memory_size,
@@ -1466,7 +1466,7 @@ debug!("ikm {}", initial_kernel_memory_size);
         // process's memory out of.
         let (app_memory_start, app_memory_size)
             = match tbf_header.get_fixed_address_ram() {
-                /*Some(start) => (
+               /* Some(start) => (
                     start as *const u8,
                     app_region_start as usize + app_region_size - start as usize,
                 ),*/
@@ -1494,7 +1494,7 @@ debug!("...");
         if let Some(fixed_memory_start) = tbf_header.get_fixed_address_ram() {
             let actual_address = app_memory.as_ptr() as u32;
             let expected_address = fixed_memory_start;
-            if actual_address != expected_address {
+            if actual_address > expected_address {
                 return Err(ProcessLoadError::MemoryAddressMismatch {
                     actual_address,
                     expected_address,
