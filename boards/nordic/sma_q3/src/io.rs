@@ -18,7 +18,7 @@ enum Writer {
 static mut WRITER: Writer = Writer::Uninitialized;
 
 fn wait() {
-    for _ in 0..100 {
+    for _ in 0..400 {
         cortexm4::support::nop();
     }
 }
@@ -54,6 +54,7 @@ impl IoWrite for Writer {
                 let mut write_position = up_buffer.write_position.get();
 
                 for &c in buf {
+                    wait();
                     buffer[write_position as usize] = c;
                     write_position = (write_position + 1) % buffer_len;
                     up_buffer.write_position.set(write_position);
