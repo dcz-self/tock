@@ -583,17 +583,14 @@ impl<const NUM_REGIONS: usize, const MIN_REGION_SIZE: usize> mpu::MPU
         // If the start and length don't align, move region until it does
         let (mut region_start, mut region_size) = match app_memory_start {
             Some(start) => {
-                // If the app needs a start that's misaligned,
-                // make sure it lies within the region.
+                // If the app needs a fixed start, put it within the region.
                 let start = start as usize;
-                let region_start = start - start % region_size;
-                let app_end = start + memory_size;
-                let region_size = if region_start + region_size < app_end {
-                    region_size * 2
-                } else {
-                    region_size
-                };
-                (region_start, region_size)
+                // Need to take region size into account because it has a minimal size.
+                let region_start = start - (start % region_size);
+                math::extend_to_pow2(
+                    region_start,
+                    cmp::max(start + memory_size, region_start + region_size),
+                )
             }
             None => {
                 // The region should start as close as possible to the start of the unallocated memory.
@@ -620,7 +617,10 @@ impl<const NUM_REGIONS: usize, const MIN_REGION_SIZE: usize> mpu::MPU
             if initial_kernel_memory_size == 0 {
                 8
             } else {
-                initial_app_memory_size * 8 / region_size + 1
+                let app_start = app_memory_start.map_or(region_start, |a| a as usize);
+                let app_end = app_start + initial_app_memory_size;
+                let initial_size = app_end - region_start;
+                initial_size * 8 / region_size + 1
             }
         };
 
@@ -636,6 +636,7 @@ impl<const NUM_REGIONS: usize, const MIN_REGION_SIZE: usize> mpu::MPU
         if subregions_end > kernel_memory_break {
             match app_memory_start {
                 Some(start) => {
+                    // The region must include start.
                     // Add one subregion to remove any overlapping.
                     // More isn't needed because the region was already sized to
                     // cover the app+kernel size.
@@ -653,7 +654,9 @@ impl<const NUM_REGIONS: usize, const MIN_REGION_SIZE: usize> mpu::MPU
                     region_size = extended_size;
                 }
                 None => {
-                    // Push the region end twice as far out
+                    // The region may be placed anywhere.
+                    // Push the region end twice as far out,
+                    // follow up with the start if needed.
                     region_size *= 2;
                     if region_start % region_size != 0 {
                         region_start += region_size - (region_start % region_size);
@@ -665,7 +668,10 @@ impl<const NUM_REGIONS: usize, const MIN_REGION_SIZE: usize> mpu::MPU
                 if initial_kernel_memory_size == 0 {
                     8
                 } else {
-                    initial_app_memory_size * 8 / region_size + 1
+                    let app_start = app_memory_start.map_or(region_start, |a| a as usize);
+                    let app_end = app_start + initial_app_memory_size;
+                    let initial_size = app_end - region_start;
+                    initial_size * 8 / region_size + 1
                 }
             };
         }
