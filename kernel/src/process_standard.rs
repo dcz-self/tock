@@ -1469,7 +1469,7 @@ impl<C: 'static + Chip> ProcessStandard<'_, C> {
                 start as *const u8,
                 app_region_start as usize + app_region_size - start as usize,
             ),*/
-            _ | None => (app_region_start, app_region_size),
+            _ => (app_region_start, app_region_size),
         };
         debug!("appmem {:?}", (app_memory_start, app_memory_size));
         let memory_start_offset = app_memory_start as usize - remaining_memory.as_ptr() as usize;

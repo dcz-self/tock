@@ -631,17 +631,30 @@ impl<const NUM_REGIONS: usize, const MIN_REGION_SIZE: usize> mpu::MPU
         let kernel_memory_break = region_start + region_size - initial_kernel_memory_size;
 
         // If the last subregion covering app-owned memory overlaps the start of kernel-owned
-        // memory, we make the entire process memory block twice as big so there is plenty of space
+        // memory, we push the region end forward so there is plenty of space
         // between app-owned and kernel-owned memory.
         if subregions_end > kernel_memory_break {
-            region_size *= 2;
-
             match app_memory_start {
                 Some(start) => {
+                    // Add one subregion to remove any overlapping.
+                    // More isn't needed because the region was already sized to
+                    // cover the app+kernel size.
+                    // This will get rounded to a multiple of the region size anyway.
+                    let minimum_region_end = region_start + region_size + subregion_size;
                     let start = start as usize;
-                    region_start = start - start % region_size;
+
+                    // The MPU may place regions only when both ends
+                    // are multiples of the same power of 2.
+                    let (extended_start, extended_size) = math::extend_to_pow2(
+                        start,
+                        minimum_region_end,
+                    );
+                    region_start = extended_start;
+                    region_size = extended_size;
                 }
                 None => {
+                    // Push the region end twice as far out
+                    region_size *= 2;
                     if region_start % region_size != 0 {
                         region_start += region_size - (region_start % region_size);
                     }
