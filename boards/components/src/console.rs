@@ -48,6 +48,7 @@ use kernel::dynamic_deferred_call::DynamicDeferredCall;
 use kernel::hil;
 use kernel::hil::uart;
 use kernel::{static_init, static_init_half};
+use kernel::utilities::static_init::StaticUninitializedBuffer;
 
 
 use capsules::console::BUF_SIZE;
@@ -102,11 +103,11 @@ impl Component for UartMuxComponent {
 macro_rules! console_component_helper {
     () => {{
         use capsules::console::{BUF_SIZE, Console};
-        use core::mem::MaybeUninit;
-        static mut WRITE_BUF: MaybeUninit<[u8; BUF_SIZE]> = MaybeUninit::uninit();
-        static mut READ_BUF: MaybeUninit<[u8; BUF_SIZE]> = MaybeUninit::uninit();
-        static mut CONSOLE: MaybeUninit<Console<'static>> = MaybeUninit::uninit();
-        (&mut WRITE_BUF, &mut READ_BUF, &mut CONSOLE)
+        use kernel::static_buf;
+        let read_buf = static_buf!([u8; BUF_SIZE]);
+        let write_buf = static_buf!([u8; BUF_SIZE]);
+        let console = static_buf!(Console<'static>);
+        (write_buf, read_buf, console)
     }}
 }
 
@@ -132,22 +133,20 @@ impl<T: hil::uart::UartData<'static>> ConsoleComponent<T> {
 
 impl<T: hil::uart::UartData<'static>> Component for ConsoleComponent<T> {
     type StaticInput = (
-        &'static mut MaybeUninit<[u8; BUF_SIZE]>,
-        &'static mut MaybeUninit<[u8; BUF_SIZE]>,
-        &'static mut MaybeUninit<console::Console<'static>>,
+        StaticUninitializedBuffer<[u8; BUF_SIZE]>,
+        StaticUninitializedBuffer<[u8; BUF_SIZE]>,
+        StaticUninitializedBuffer<console::Console<'static>>,
     );
     type Output = &'static console::Console<'static>;
 
     unsafe fn finalize(self, s: Self::StaticInput) -> Self::Output {
         let grant_cap = create_capability!(capabilities::MemoryAllocationCapability);
 
-        let write_buffer = static_init_half!(s.0, [u8; BUF_SIZE], [0; BUF_SIZE],);
+        let write_buffer = s.0.initialize([0; BUF_SIZE]);
 
-        let read_buffer = static_init_half!(s.1, [u8; BUF_SIZE], [0; BUF_SIZE],);
+        let read_buffer = s.1.initialize([0; BUF_SIZE]);
 
-        let console = static_init_half!(
-            s.2,
-            console::Console<'static>,
+        let console = s.2.initialize(
             console::Console::new(
                 self.uart,
                 write_buffer,
