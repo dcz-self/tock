@@ -10,6 +10,6 @@ components = { path = "../../components" }
 cortexm4 = { path = "../../../arch/cortex-m4" }
 capsules = { path = "../../../capsules" }
 enum_primitive = { path = "../../../libraries/enum_primitive" }
-kernel = { path = "../../../kernel", features = ["trace_syscalls"] }
+kernel = { path = "../../../kernel", features = ["debug_load_processes"] }
 nrf52840 = { path = "../../../chips/nrf52840" }
 nrf52_components = { path = "../nrf52_components" }
