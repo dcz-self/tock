@@ -128,7 +128,7 @@ The screen driver allows the process to write data to a framebuffer of a screen.
 
     **Argument 2**: unused
 
-    **Returns**: Ok(()) followed by a callback with the rotation value, BUSY if another command is in progress.
+    **Returns**: Ok(()) followed by a callback with the resolution, BUSY if another command is in progress.
 
   * ### Command number: `24` 
 
@@ -184,7 +184,7 @@ The screen driver allows the process to write data to a framebuffer of a screen.
 
   * ### Command number: `102` 
 
-    **Description**: Initiate a fill transaction of a buffer shared using `allow_readonly`. This will fill the write frame with the first pixel in thhe buffer.
+    **Description**: Initiate a fill transaction of a buffer shared using `allow_readonly`. This will fill the write frame with the first pixel in the buffer.
     At the end of the transaction, a callback will be delivered if the process
     has `subscribed`.
 

@@ -230,7 +230,7 @@ pub trait SpiMaster {
 }
 
 /// SPIMasterDevice provides a chip-select-specific interface to the SPI
-/// Master hardware, such that a client cannot changethe chip select line.
+/// Master hardware, such that a client cannot change the chip select line.
 pub trait SpiMasterDevice {
     /// Set the callback for read_write operations.
     fn set_client(&self, client: &'static dyn SpiMasterClient);
