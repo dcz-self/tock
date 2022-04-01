@@ -463,6 +463,9 @@ pub unsafe fn main() {
             .finalize(components::spi_mux_component_helper!(
                 nrf52840::spi::SPIM
             ));
+            
+        use kernel::hil::spi::SpiMaster;
+        base_peripherals.spim2.set_rate(1_000_000);
         
         base_peripherals.spim2.configure(
             nrf52840::pinmux::Pinmux::new(Pin::P0_27 as u32),
@@ -472,11 +475,61 @@ pub unsafe fn main() {
             nrf52840::pinmux::Pinmux::new(Pin::P0_26 as u32),
         );
 
+        use kernel::hil;
+        struct Inverted<'a, P: hil::gpio::Pin>(&'a P);
+        impl<'a, P: hil::gpio::Pin> hil::gpio::Configure for Inverted<'a, P> {
+            fn configuration(&self) -> kernel::hil::gpio::Configuration {
+                self.0.configuration()
+            }
+            fn make_output(&self) -> kernel::hil::gpio::Configuration {
+                self.0.make_output()
+            }
+            fn disable_output(&self) -> kernel::hil::gpio::Configuration {
+                self.0.disable_output()
+            }
+            fn make_input(&self) -> kernel::hil::gpio::Configuration {
+                self.0.make_input()
+            }
+            fn disable_input(&self) -> kernel::hil::gpio::Configuration {
+                self.0.disable_input()
+            }
+            fn deactivate_to_low_power(&self) {
+                self.0.deactivate_to_low_power()
+            }
+            fn set_floating_state(&self, _: kernel::hil::gpio::FloatingState) {
+                unimplemented!() // not sure what it looks like with inversion
+            }
+            fn floating_state(&self) -> kernel::hil::gpio::FloatingState {
+                unimplemented!() // not sure what it looks like with inversion
+            }
+        }
+        impl<'a, P: hil::gpio::Pin> hil::gpio::Output for Inverted<'a, P> {
+            fn set(&self) {
+                self.0.clear()
+            }
+            fn clear(&self) {
+                self.0.set()
+            }
+            fn toggle(&self) -> bool {
+                self.0.toggle()
+            }
+        }
+        impl<'a, P: hil::gpio::Pin> hil::gpio::Input for Inverted<'a, P> {
+            fn read(&self) -> bool {
+                !self.0.read()
+            }
+        }
+        
+        let chip_select = static_init!(
+            Inverted<'static, nrf52840::gpio::GPIOPin>,
+            Inverted(&nrf52840_peripherals.gpio_port[Pin::P0_05]),
+        );
+        
         let spi_device = static_init!(
             VirtualSpiMasterDevice<'static, nrf52840::spi::SPIM>,
             VirtualSpiMasterDevice::new(
                 mux_spi,
-                &nrf52840_peripherals.gpio_port[Pin::P0_05],
+                chip_select,
             ),
         );
         spi_device.setup();
@@ -509,8 +562,8 @@ pub unsafe fn main() {
     impl<S: 'static + kernel::hil::time::Alarm<'static>, P: 'static + kernel::hil::gpio::Pin, B: 'static + kernel::hil::spi::SpiMasterDevice> kernel::hil::screen::ScreenClient for D<S, P, B> {
         fn screen_is_ready(&self) {
             debug!("Display ready");
-            let mut b = unsafe { static_init!([u8; 100], [0x55; 100]) };
-            dbg!(self.0.write(&mut b[..], 100));
+            //let mut b = unsafe { static_init!([u8; 100], [0x55; 100]) };
+            //dbg!(self.0.write(&mut b[..], 100));
         }
         fn command_complete(&self, res: Result<(), ErrorCode>) {
             debug!("Command complete");

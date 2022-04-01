@@ -107,6 +107,9 @@ enum Mode {
     /// Clear memory
     /// bits: 0 Function, X, 1 Clear, 0 Blink off, X, X
     AllClear = 0b001000,
+    /// Invert colors periodically
+    /// bits: 0 Function, X, 0 No Clear, 1 Blink, 1 White, 1 Invert
+    BlinkInversion = 0b000111,
     /// Input 1-bit data
     /// bits: 1 No function, X, 0 Data Update, 01 1-bit, X
     Input1Bit = 0b100_01_0,
@@ -224,15 +227,16 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> Lpm013m126<'a, A, P, S> {
                         buf.copy_from_slice(
                             &CommandHeader {
                                 mode: Mode::AllClear,
+                                //mode: Mode::BlinkInversion,
                                 gate_line: 0,
                             }
                             .encode()
                         );
-
+                        let l = FrameBuffer::with_raw_rows(frame_buffer, 0, 1);
                         let res = self.spi.read_write_bytes(
-                            FrameBuffer::with_raw_rows(frame_buffer, 0, 1),
+                            l,//FrameBuffer::with_raw_rows(frame_buffer, 0, 1),
                             None,
-                            4,
+                            2,
                         );
 
                         let (res, new_state) = match res {
