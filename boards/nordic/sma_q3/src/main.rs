@@ -520,16 +520,11 @@ pub unsafe fn main() {
             }
         }
         
-        /*let chip_select = static_init!(
+        let chip_select = static_init!(
             Inverted<'static, nrf52840::gpio::GPIOPin>,
             Inverted(&nrf52840_peripherals.gpio_port[Pin::P0_05]),
-        );*/
-        let chip_select = &nrf52840_peripherals.gpio_port[Pin::P0_05];
-        
-        use kernel::hil::gpio::{Configure, Output};
-        chip_select.make_output();
-        chip_select.clear();
-        
+        );
+
         let spi_device = static_init!(
             VirtualSpiMasterDevice<'static, nrf52840::spi::SPIM>,
             VirtualSpiMasterDevice::new(
@@ -567,8 +562,8 @@ pub unsafe fn main() {
     impl<S: 'static + kernel::hil::time::Alarm<'static>, P: 'static + kernel::hil::gpio::Pin, B: 'static + kernel::hil::spi::SpiMasterDevice> kernel::hil::screen::ScreenClient for D<S, P, B> {
         fn screen_is_ready(&self) {
             debug!("Display ready");
-            //let mut b = unsafe { static_init!([u8; 100], [0x55; 100]) };
-            //dbg!(self.0.write(&mut b[..], 100));
+            let mut b = unsafe { static_init!([u8; 100], [0x55; 100]) };
+            dbg!(self.0.write(&mut b[..], 100));
         }
         fn command_complete(&self, res: Result<(), ErrorCode>) {
             debug!("Command complete");

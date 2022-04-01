@@ -227,7 +227,6 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> Lpm013m126<'a, A, P, S> {
                         buf.copy_from_slice(
                             &CommandHeader {
                                 mode: Mode::AllClear,
-                                //mode: Mode::BlinkInversion,
                                 gate_line: 0,
                             }
                             .encode()
