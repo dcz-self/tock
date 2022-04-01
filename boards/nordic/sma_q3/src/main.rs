@@ -520,10 +520,15 @@ pub unsafe fn main() {
             }
         }
         
-        let chip_select = static_init!(
+        /*let chip_select = static_init!(
             Inverted<'static, nrf52840::gpio::GPIOPin>,
             Inverted(&nrf52840_peripherals.gpio_port[Pin::P0_05]),
-        );
+        );*/
+        let chip_select = &nrf52840_peripherals.gpio_port[Pin::P0_05];
+        
+        use kernel::hil::gpio::{Configure, Output};
+        chip_select.make_output();
+        chip_select.clear();
         
         let spi_device = static_init!(
             VirtualSpiMasterDevice<'static, nrf52840::spi::SPIM>,
