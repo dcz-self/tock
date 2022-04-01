@@ -39,6 +39,12 @@ impl Pinmux {
             Pinmux(pin)
         }
     }
+
+    /// Creates a new `Pinmux` marked as disabled.
+    pub unsafe fn new_disabled() -> Pinmux {
+        // bit 31 is "disconnect"
+        Pinmux(1 << 31)
+    }
 }
 
 impl Into<u32> for Pinmux {

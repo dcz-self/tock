@@ -204,7 +204,9 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> Lpm013m126<'a, A, P, S> {
                 // which don't implement Configure due to being
                 // simple, unconfigurable outputs.
                 self.extcomin.make_output();
+                self.extcomin.clear();
                 self.disp.make_output();
+                self.disp.clear();
 
                 match self.frame_buffer.take() {
                     None => Err(ErrorCode::NOMEM),
@@ -425,12 +427,12 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> SpiMasterClient for Lpm013m12
         self.frame_buffer.replace(FrameBuffer::new(write_buffer));
         self.state.set(match self.state.get() {
             State::InitializingPixelMemory => {
-                self.disp.set();
-                self.extcomin.set();
                 // Rather than initialize them separately, wait longer and do both
                 // for 2 reasons:
                 // 1. the upper limit of waiting is only specified for both,
                 // 2. and state flipping code is annoying and bug-friendly.
+                self.disp.set();
+                self.extcomin.set();
                 let delay = self.alarm.ticks_from_us(200);
                 self.alarm.set_alarm(self.alarm.now(), delay);
                 State::InitializingRest

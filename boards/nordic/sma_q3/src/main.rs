@@ -10,11 +10,13 @@
 #![deny(missing_docs)]
 
 use capsules::bmp280::Bmp280;
+use capsules::lpm013m126::Lpm013m126;
 use capsules::mx25r6435f;
 use capsules::virtual_aes_ccm::MuxAES128CCM;
 use capsules::virtual_alarm::VirtualMuxAlarm;
-use components::bmp280_component_helper;
+use components::{bmp280_component_helper, lpm013m126_component_helper};
 use components::bmp280::Bmp280Component;
+use components::lpm013m126::Lpm013m126Component;
 use kernel::component::Component;
 use kernel::dynamic_deferred_call::{DynamicDeferredCall, DynamicDeferredCallClientState};
 use kernel::hil;
@@ -453,6 +455,34 @@ pub unsafe fn main() {
             4096,
         ));
 
+    let display = {
+        let mux_spi =
+        components::spi::SpiMuxComponent::new(&base_peripherals.spim0, dynamic_deferred_caller)
+            .finalize(components::spi_mux_component_helper!(nrf52840::spi::SPIM));
+        
+        base_peripherals.spim1.configure(
+            nrf52840::pinmux::Pinmux::new(Pin::P0_27 as u32),
+            nrf52840::pinmux::Pinmux::new_disabled(),
+            nrf52840::pinmux::Pinmux::new(Pin::P0_26 as u32),
+        );
+        let display
+            = components::lpm013m126::Lpm013m126Component {
+                spi: mux_spi,
+                disp: &nrf52840_peripherals.gpio_port[Pin::P0_07],
+                extcomin: &nrf52840_peripherals.gpio_port[Pin::P0_06],
+                alarm_mux: mux_alarm,
+            }
+            .finalize(
+                components::lpm013m126_component_helper!(
+                    nrf52840::rtc::Rtc<'static>,
+                    (),
+                    (),
+                ),
+            );
+        display.initialize();
+        display
+    };
+        
     let gnss = {
         use kernel::hil::uart;
         use kernel::hil::uart::Configure;
