@@ -46,6 +46,7 @@ macro_rules! lpm013m126_component_helper {
         use capsules::lpm013m126::{BUFFER_SIZE, Lpm013m126};
         use kernel::static_buf;
 
+        let alarm = static_buf!(VirtualMuxAlarm<'static, $A>);
         static mut BUFFER: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
 
         let lpm013m126 = static_buf!(Lpm013m126<
@@ -54,7 +55,7 @@ macro_rules! lpm013m126_component_helper {
             $P,
             $S,
         >);
-        let alarm = static_buf!(VirtualMuxAlarm<'static, $A>);
+
         (alarm, &mut BUFFER, lpm013m126)
     }};
 }
