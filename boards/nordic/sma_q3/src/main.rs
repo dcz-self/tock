@@ -501,10 +501,16 @@ pub unsafe fn main() {
     };
     debug!("Display started");
     use kernel::ErrorCode;
-    struct D;
-    impl kernel::hil::screen::ScreenClient for D {
+    
+    struct D<S: 'static + kernel::hil::time::Alarm<'static>, P: 'static + kernel::hil::gpio::Pin, B: 'static + kernel::hil::spi::SpiMasterDevice>(
+        &'static capsules::lpm013m126::Lpm013m126<'static, S, P, B>
+    );
+    
+    impl<S: 'static + kernel::hil::time::Alarm<'static>, P: 'static + kernel::hil::gpio::Pin, B: 'static + kernel::hil::spi::SpiMasterDevice> kernel::hil::screen::ScreenClient for D<S, P, B> {
         fn screen_is_ready(&self) {
             debug!("Display ready");
+            let mut b = unsafe { static_init!([u8; 100], [0x55; 100]) };
+            dbg!(self.0.write(&mut b[..], 100));
         }
         fn command_complete(&self, res: Result<(), ErrorCode>) {
             debug!("Command complete");
@@ -514,7 +520,18 @@ pub unsafe fn main() {
         }
     }
     use kernel::hil::screen::Screen;
-    display.set_client(Some(&D));
+    use capsules::virtual_spi::VirtualSpiMasterDevice;
+    
+    let cd = static_init!(
+        D<
+            VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>,
+                    nrf52840::gpio::GPIOPin,
+                    VirtualSpiMasterDevice<'static, nrf52840::spi::SPIM>,
+                    >,
+        D(display)
+    );
+    
+    display.set_client(Some(cd));
     
     let gnss = {
         use kernel::hil::uart;

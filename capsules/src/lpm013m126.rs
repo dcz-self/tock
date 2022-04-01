@@ -60,12 +60,18 @@ impl<'a> FrameBuffer<'a> {
         }
     }
 
-    /// Copy bytes from the buffer. The buffer may be shorter than frame.
+    /// Copy pixels from the buffer. The buffer may be shorter than frame.
     fn blit(&mut self, buffer: &[u8], frame: &WriteFrame) {
+        if frame.column != 0 {
+            // Can't be arsed to bit shift pixels…
+            panic!("Horizontal offset not supported");
+        }
         let rows = (frame.row)..(frame.row + frame.height);
-        let sources = buffer.chunks(frame.width as usize);
+        // There are 8 pixels in each row per byte.
+        let sources = buffer.chunks(frame.width as usize / 8);
         for (i, source) in rows.zip(sources) {
             let row = self.get_row_mut(i);
+            debug!("rowl {} soul {}", row.len(), source.len());
             row[..(source.len())].copy_from_slice(source);
         }
     }
@@ -226,7 +232,7 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> Lpm013m126<'a, A, P, S> {
                         let res = self.spi.read_write_bytes(
                             FrameBuffer::with_raw_rows(frame_buffer, 0, 1),
                             None,
-                            2,
+                            4,
                         );
 
                         let (res, new_state) = match res {
@@ -315,7 +321,7 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> Screen for Lpm013m126<'a, A, 
     }
 
     fn write(&self, buffer: &'static mut [u8], len: usize) -> Result<(), ErrorCode> {
-        match self.state.get() {
+        let ret = match self.state.get() {
             State::Uninitialized => Err(ErrorCode::OFF),
             State::InitializingPixelMemory
             | State::InitializingRest => Err(ErrorCode::BUSY),
@@ -328,6 +334,7 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> Screen for Lpm013m126<'a, A, 
                             frame.row,
                             frame.row + frame.height,
                         );
+                        debug!("write");
                         let sent = self.spi.read_write_bytes(send_buf, None, send_buf.len());
                         let (ret, new_state) = match sent {
                             Ok(()) => (Ok(()), State::Writing(frame)),
@@ -343,7 +350,18 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> Screen for Lpm013m126<'a, A, 
             },
             State::Writing(..) => Err(ErrorCode::BUSY),
             State::Bug => Err(ErrorCode::FAIL),
-        }
+        };
+
+        self.buffer.replace(buffer);
+        match self.state.get() {
+            State::Writing(..) => {},
+            _ => {
+                self.client.map(|client| self.buffer.take().map(
+                    |buffer| client.write_complete(buffer, ret)
+                ));
+            }
+        };
+        ret
     }
 
     fn write_continue(&self, buffer: &'static mut [u8], len: usize) -> Result<(), ErrorCode> {
@@ -424,6 +442,7 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> SpiMasterClient for Lpm013m12
         _len: usize,
         status: Result<(), ErrorCode>,
     ) {
+    debug!("write done");
         self.frame_buffer.replace(FrameBuffer::new(write_buffer));
         self.state.set(match self.state.get() {
             State::InitializingPixelMemory => {
@@ -444,8 +463,10 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> SpiMasterClient for Lpm013m12
                 State::Bug
             },
         });
-        self.client.map(|client|
-            self.buffer.take().map(|buf| client.write_complete(buf, status))
+        debug!("write complete");
+        self.client.map(|client|{
+        debug!("write client");
+            self.buffer.take().map(|buf| client.write_complete(buf, status))}
         );
     }
 }
