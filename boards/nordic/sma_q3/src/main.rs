@@ -10,16 +10,13 @@
 #![deny(missing_docs)]
 
 use capsules::bmp280::Bmp280;
-use capsules::lpm013m126::Lpm013m126;
 use capsules::mx25r6435f;
 use capsules::virtual_aes_ccm::MuxAES128CCM;
 use capsules::virtual_alarm::VirtualMuxAlarm;
-use components::{bmp280_component_helper, lpm013m126_component_helper};
+use components::bmp280_component_helper;
 use components::bmp280::Bmp280Component;
-use components::lpm013m126::Lpm013m126Component;
 use kernel::component::Component;
 use kernel::dynamic_deferred_call::{DynamicDeferredCall, DynamicDeferredCallClientState};
-use kernel::hil;
 use kernel::hil::sensors::{TemperatureClient, TemperatureDriver};
 use kernel::hil::i2c::I2CMaster;
 use kernel::hil::led::LedHigh;
@@ -456,12 +453,12 @@ pub unsafe fn main() {
         ));
 
     let display = {
-        use capsules::virtual_spi::{ MuxSpiMaster, VirtualSpiMasterDevice};
+        use capsules::virtual_spi::VirtualSpiMasterDevice;
 
         let mux_spi
             = components::spi::SpiMuxComponent::new(
-                &base_peripherals.spim0,
-                dynamic_deferred_caller
+                &base_peripherals.spim1,
+                dynamic_deferred_caller,
             )
             .finalize(components::spi_mux_component_helper!(
                 nrf52840::spi::SPIM
@@ -469,10 +466,12 @@ pub unsafe fn main() {
         
         base_peripherals.spim1.configure(
             nrf52840::pinmux::Pinmux::new(Pin::P0_27 as u32),
-            nrf52840::pinmux::Pinmux::new_disabled(),
+            //nrf52840::pinmux::Pinmux::new_disabled(),
+            // not used but let's check
+            nrf52840::pinmux::Pinmux::new(Pin::P0_28 as u32),
             nrf52840::pinmux::Pinmux::new(Pin::P0_26 as u32),
         );
-        
+
         let spi_device = static_init!(
             VirtualSpiMasterDevice<'static, nrf52840::spi::SPIM>,
             VirtualSpiMasterDevice::new(
@@ -480,6 +479,7 @@ pub unsafe fn main() {
                 &nrf52840_peripherals.gpio_port[Pin::P0_05],
             ),
         );
+        //spi_device.setup();
         let display
             = components::lpm013m126::Lpm013m126Component {
                 spi: spi_device,
@@ -497,7 +497,23 @@ pub unsafe fn main() {
         display.initialize().unwrap();
         display
     };
-        
+    debug!("Display started");
+    use kernel::ErrorCode;
+    struct D;
+    impl kernel::hil::screen::ScreenClient for D {
+        fn screen_is_ready(&self) {
+            debug!("Display ready");
+        }
+        fn command_complete(&self, res: Result<(), ErrorCode>) {
+            debug!("Command complete");
+        }
+        fn write_complete(&self, _: &'static mut [u8], _: Result<(), ErrorCode>) {
+            debug!("Write complete");
+        }
+    }
+    use kernel::hil::screen::Screen;
+    display.set_client(Some(&D));
+    
     let gnss = {
         use kernel::hil::uart;
         use kernel::hil::uart::Configure;
