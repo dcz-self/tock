@@ -562,7 +562,7 @@ pub unsafe fn main() {
     impl<S: 'static + kernel::hil::time::Alarm<'static>, P: 'static + kernel::hil::gpio::Pin, B: 'static + kernel::hil::spi::SpiMasterDevice> kernel::hil::screen::ScreenClient for D<S, P, B> {
         fn screen_is_ready(&self) {
             debug!("Display ready");
-            let mut b = unsafe { static_init!([u8; 100], [0x55; 100]) };
+            let mut b = unsafe { static_init!([u8; 100], [0x83; 100]) };
             dbg!(self.0.write(&mut b[..], 100));
         }
         fn command_complete(&self, res: Result<(), ErrorCode>) {

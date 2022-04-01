@@ -337,7 +337,7 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> Screen for Lpm013m126<'a, A, 
                             frame.row,
                             frame.row + frame.height,
                         );
-
+                        debug!("{:?}", &send_buf[..20]);
                         let sent = self.spi.read_write_bytes(send_buf, None, send_buf.len());
                         let (ret, new_state) = match sent {
                             Ok(()) => (Ok(()), State::Writing(frame)),
