@@ -334,7 +334,7 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> Screen for Lpm013m126<'a, A, 
                             frame.row,
                             frame.row + frame.height,
                         );
-                        debug!("write");
+
                         let sent = self.spi.read_write_bytes(send_buf, None, send_buf.len());
                         let (ret, new_state) = match sent {
                             Ok(()) => (Ok(()), State::Writing(frame)),
@@ -442,7 +442,6 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> SpiMasterClient for Lpm013m12
         _len: usize,
         status: Result<(), ErrorCode>,
     ) {
-    debug!("write done");
         self.frame_buffer.replace(FrameBuffer::new(write_buffer));
         self.state.set(match self.state.get() {
             State::InitializingPixelMemory => {
@@ -463,9 +462,8 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> SpiMasterClient for Lpm013m12
                 State::Bug
             },
         });
-        debug!("write complete");
+
         self.client.map(|client|{
-        debug!("write client");
             self.buffer.take().map(|buf| client.write_complete(buf, status))}
         );
     }
