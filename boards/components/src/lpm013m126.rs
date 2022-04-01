@@ -4,15 +4,27 @@
 //! -----
 //!
 //! ```rust
+//! // Optional
+//! let spi_device = static_init!(
+//!     VirtualSpiMasterDevice<'static, nrf52840::spi::SPIM>,
+//!     VirtualSpiMasterDevice::new(
+//!         mux_spi,
+//!         &nrf52840_peripherals.gpio_port[Pin::P0_05], // CS pin
+//!     ),
+//! );
 //! let display
 //!     = components::lpm013m126::Lpm013m126Component {
-//!         spi,
+//!         spi: spi_device,
 //!         disp: disp_pin,
 //!         extcomin: extcomin_pin,
 //!         alarm_mux,
 //!     }
 //!     .finalize(
-//!         components::lpm013m126_component_helper!(nrf52840::rtc::Rtc<'static>),
+//!         components::lpm013m126_component_helper!(
+//!             nrf52840::rtc::Rtc<'static>,
+//!             nrf52840::gpio::GPIOPin,
+//!             VirtualSpiMasterDevice<'static, nrf52840::spi::SPIM>,
+//!         )
 //!     );
 //! display.initialize();
 //! // wait for `ScreenClient::screen_is_ready` callback
