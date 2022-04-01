@@ -44,6 +44,7 @@ use kernel::utilities::static_init::StaticUninitializedBuffer;
 macro_rules! lpm013m126_component_helper {
     ($A:ty, $P:ty, $S:ty $(,)?) => {{
         use capsules::lpm013m126::{BUFFER_SIZE, Lpm013m126};
+        use capsules::virtual_alarm::VirtualMuxAlarm;
         use kernel::static_buf;
 
         let alarm = static_buf!(VirtualMuxAlarm<'static, $A>);
