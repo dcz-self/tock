@@ -23,10 +23,11 @@ use kernel::ErrorCode;
 /// Monochrome frame buffer bytes.
 /// 176 × 176 bits = 3872 bytes.
 ///
-/// 2 bytes for the start of each row (command header)
-/// + 2 bytes for the end (data transfer period):
-/// 176 * 4 = 704 bytes.
-pub const BUFFER_SIZE: usize = 3872 + 704;
+/// 2 bytes for the start of each row (command header),
+/// plus 2 bytes of data transfer period at the end
+///
+/// 176 * 2 + 2 = 354 bytes.
+pub const BUFFER_SIZE: usize = 3872 + 354;
 
 /// Best Tock can do, sadly.
 /// Would be better to have it offset.
@@ -78,13 +79,15 @@ impl<'a> FrameBuffer<'a> {
     
     /// Gets an entire raw line, ready to send.
     fn get_line_mut(&mut self, index: u16) -> &mut [u8] {
-        let line_bytes = 176 / 8 + 4;
-        &mut self.data[(line_bytes * index as usize)..][..line_bytes]
+        const cmd: usize = 2;
+        const transfer_period: usize = 2;
+        let line_bytes = cmd + 176 / 8;
+        &mut self.data[(line_bytes * index as usize)..][..line_bytes + transfer_period]
     }
     
     /// Gets pixel data.
     fn get_row_mut(&mut self, index: u16) -> &mut [u8] {
-        let line_bytes = 176 / 8 + 4;
+        let line_bytes = 176 / 8 + 2;
         &mut self.data[(line_bytes * index as usize + 2)..][..(176 / 8)]
     }
     
@@ -337,8 +340,10 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> Screen for Lpm013m126<'a, A, 
                             frame.row,
                             frame.row + frame.height,
                         );
-                        debug!("{:?}", &send_buf[..20]);
-                        let sent = self.spi.read_write_bytes(send_buf, None, send_buf.len());
+                        //send_buf[0] = 67;
+                        //send_buf[2] = 0;
+                        debug!("{}, {:?}", send_buf.len(), &send_buf[47..73]);
+                        let sent = self.spi.read_write_bytes(send_buf, None, 73);
                         let (ret, new_state) = match sent {
                             Ok(()) => (Ok(()), State::Writing(frame)),
                             Err((e, buf, _)) => {
