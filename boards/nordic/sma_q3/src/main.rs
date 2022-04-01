@@ -456,18 +456,33 @@ pub unsafe fn main() {
         ));
 
     let display = {
-        let mux_spi =
-        components::spi::SpiMuxComponent::new(&base_peripherals.spim0, dynamic_deferred_caller)
-            .finalize(components::spi_mux_component_helper!(nrf52840::spi::SPIM));
+        use capsules::virtual_spi::{ MuxSpiMaster, VirtualSpiMasterDevice};
+
+        let mux_spi
+            = components::spi::SpiMuxComponent::new(
+                &base_peripherals.spim0,
+                dynamic_deferred_caller
+            )
+            .finalize(components::spi_mux_component_helper!(
+                nrf52840::spi::SPIM
+            ));
         
         base_peripherals.spim1.configure(
             nrf52840::pinmux::Pinmux::new(Pin::P0_27 as u32),
             nrf52840::pinmux::Pinmux::new_disabled(),
             nrf52840::pinmux::Pinmux::new(Pin::P0_26 as u32),
         );
+        
+        let spi_device = static_init!(
+            VirtualSpiMasterDevice<'static, nrf52840::spi::SPIM>,
+            VirtualSpiMasterDevice::new(
+                mux_spi,
+                &nrf52840_peripherals.gpio_port[Pin::P0_05],
+            ),
+        );
         let display
             = components::lpm013m126::Lpm013m126Component {
-                spi: mux_spi,
+                spi: spi_device,
                 disp: &nrf52840_peripherals.gpio_port[Pin::P0_07],
                 extcomin: &nrf52840_peripherals.gpio_port[Pin::P0_06],
                 alarm_mux: mux_alarm,
@@ -475,8 +490,8 @@ pub unsafe fn main() {
             .finalize(
                 components::lpm013m126_component_helper!(
                     nrf52840::rtc::Rtc<'static>,
-                    (),
-                    (),
+                    nrf52840::gpio::GPIOPin,
+                    VirtualSpiMasterDevice<'static, nrf52840::spi::SPIM>,
                 ),
             );
         display.initialize();
