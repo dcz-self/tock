@@ -228,7 +228,7 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> Lpm013m126<'a, A, P, S> {
                             None,
                             2,
                         );
-                        
+
                         let (res, new_state) = match res {
                             Ok(()) => (Ok(()), State::InitializingPixelMemory),
                             Err((e, buf, _)) => {

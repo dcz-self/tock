@@ -457,14 +457,14 @@ pub unsafe fn main() {
 
         let mux_spi
             = components::spi::SpiMuxComponent::new(
-                &base_peripherals.spim1,
+                &base_peripherals.spim2,
                 dynamic_deferred_caller,
             )
             .finalize(components::spi_mux_component_helper!(
                 nrf52840::spi::SPIM
             ));
         
-        base_peripherals.spim1.configure(
+        base_peripherals.spim2.configure(
             nrf52840::pinmux::Pinmux::new(Pin::P0_27 as u32),
             //nrf52840::pinmux::Pinmux::new_disabled(),
             // not used but let's check
@@ -479,7 +479,8 @@ pub unsafe fn main() {
                 &nrf52840_peripherals.gpio_port[Pin::P0_05],
             ),
         );
-        //spi_device.setup();
+        spi_device.setup();
+
         let display
             = components::lpm013m126::Lpm013m126Component {
                 spi: spi_device,
@@ -494,7 +495,8 @@ pub unsafe fn main() {
                     VirtualSpiMasterDevice<'static, nrf52840::spi::SPIM>,
                 ),
             );
-        display.initialize().unwrap();
+
+        dbg!(display.initialize());
         display
     };
     debug!("Display started");
