@@ -173,11 +173,12 @@ pub struct Lpm013m126<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> {
 }
 
 impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> Lpm013m126<'a, A, P, S> {
+    /// Caution: passing `frame_buffer` that's too small will panic.
     pub fn new(
         spi: &'a S,
-        alarm: &'a A,
         extcomin: &'a P,
         disp: &'a P,
+        alarm: &'a A,
         frame_buffer: &'static mut [u8],
     ) -> Self {
         Self {
