@@ -26,7 +26,7 @@
 //!             VirtualSpiMasterDevice<'static, nrf52840::spi::SPIM>,
 //!         )
 //!     );
-//! display.initialize();
+//! display.initialize().unwrap();
 //! // wait for `ScreenClient::screen_is_ready` callback
 //! ```
 

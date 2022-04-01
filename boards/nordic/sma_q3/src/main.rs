@@ -494,7 +494,7 @@ pub unsafe fn main() {
                     VirtualSpiMasterDevice<'static, nrf52840::spi::SPIM>,
                 ),
             );
-        display.initialize();
+        display.initialize().unwrap();
         display
     };
         
