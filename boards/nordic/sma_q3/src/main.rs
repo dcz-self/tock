@@ -482,18 +482,25 @@ pub unsafe fn main() {
             Inverted(&nrf52840_peripherals.gpio_port[Pin::P0_05]),
         );
 
+        let c: components::lpm013m126::Lpm013m126Component<
+            nrf52840::rtc::Rtc<'static>,
+            nrf52840::gpio::GPIOPin<'_>,
+            VirtualSpiMasterDevice<'static, nrf52840::spi::SPIM>,
+        >
+        = components::lpm013m126::Lpm013m126Component {
+            spi: Default::default(),
+            disp: &nrf52840_peripherals.gpio_port[Pin::P0_07],
+            extcomin: &nrf52840_peripherals.gpio_port[Pin::P0_06],
+            alarm_mux: mux_alarm,
+        };
+        
         let display: &'static capsules::lpm013m126::Lpm013m126<
             'static,
             VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>,
             nrf52840::gpio::GPIOPin<'_>,
             VirtualSpiMasterDevice<'static, nrf52840::spi::SPIM>
         >
-            = components::lpm013m126::Lpm013m126Component {
-                spi: Default::default(),
-                disp: &nrf52840_peripherals.gpio_port[Pin::P0_07],
-                extcomin: &nrf52840_peripherals.gpio_port[Pin::P0_06],
-                alarm_mux: mux_alarm,
-            }
+            = c
             .finalize(
                 components::lpm013m126_component_helper!(
                     nrf52840::rtc::Rtc<'static>,
