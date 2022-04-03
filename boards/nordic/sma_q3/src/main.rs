@@ -480,12 +480,11 @@ pub unsafe fn main() {
             nrf52840::gpio::GPIOPin<'_>,
             nrf52840::spi::SPIM,
         >
-        = components::lpm013m126::Lpm013m126Component {
-            spi: Default::default(),
-            disp: &nrf52840_peripherals.gpio_port[Pin::P0_07],
-            extcomin: &nrf52840_peripherals.gpio_port[Pin::P0_06],
-            alarm_mux: mux_alarm,
-        };
+        = components::lpm013m126::Lpm013m126Component::new(
+            &nrf52840_peripherals.gpio_port[Pin::P0_07],
+            &nrf52840_peripherals.gpio_port[Pin::P0_06],
+            mux_alarm,
+        );
         
         let display: &'static capsules::lpm013m126::Lpm013m126<
             'static,

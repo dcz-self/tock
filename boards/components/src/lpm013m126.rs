@@ -14,8 +14,8 @@
 //! );
 //! let display
 //!     = components::lpm013m126::Lpm013m126Component::new(
-//!         disp: disp_pin,
-//!         extcomin: extcomin_pin,
+//!         disp_pin,
+//!         extcomin_pin,
 //!         alarm_mux,
 //!     )
 //!     .finalize(
@@ -23,6 +23,8 @@
 //!             nrf52840::rtc::Rtc<'static>,
 //!             nrf52840::gpio::GPIOPin,
 //!             VirtualSpiMasterDevice<'static, nrf52840::spi::SPIM>,
+//!             spi_mux,
+//!             cs_pin,
 //!         )
 //!     );
 //! display.initialize().unwrap();
@@ -130,10 +132,26 @@ pub struct Lpm013m126Component<A, P, S>
     P: 'static + gpio::Pin,P: gpio::Pin,
     S: 'static + SpiMaster,
 {
-    pub spi: core::marker::PhantomData<S>,
-    pub disp: &'static P,
-    pub extcomin: &'static P,
-    pub alarm_mux: &'static MuxAlarm<'static, A>,
+    spi: core::marker::PhantomData<S>,
+    disp: &'static P,
+    extcomin: &'static P,
+    alarm_mux: &'static MuxAlarm<'static, A>,
+}
+
+impl<A, P, S> Lpm013m126Component<A, P, S>
+    where
+    A: 'static + Alarm<'static>,
+    P: 'static + gpio::Pin,P: gpio::Pin,
+    S: 'static + SpiMaster,
+{
+    pub fn new(disp: &'static P, extcomin: &'static P, alarm_mux: &'static  MuxAlarm<'static, A>) -> Self {
+        Self {
+            spi: Default::default(),
+            disp,
+            extcomin,
+            alarm_mux,
+        }
+    }
 }
 
 impl<A, P, S> Component for Lpm013m126Component<A, P, S>
