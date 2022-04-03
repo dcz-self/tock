@@ -474,51 +474,8 @@ pub unsafe fn main() {
             nrf52840::pinmux::Pinmux::new(Pin::P0_28 as u32),
             nrf52840::pinmux::Pinmux::new(Pin::P0_26 as u32),
         );
-
-        use kernel::hil;
-        struct Inverted<'a, P: hil::gpio::Pin>(&'a P);
-        impl<'a, P: hil::gpio::Pin> hil::gpio::Configure for Inverted<'a, P> {
-            fn configuration(&self) -> kernel::hil::gpio::Configuration {
-                self.0.configuration()
-            }
-            fn make_output(&self) -> kernel::hil::gpio::Configuration {
-                self.0.make_output()
-            }
-            fn disable_output(&self) -> kernel::hil::gpio::Configuration {
-                self.0.disable_output()
-            }
-            fn make_input(&self) -> kernel::hil::gpio::Configuration {
-                self.0.make_input()
-            }
-            fn disable_input(&self) -> kernel::hil::gpio::Configuration {
-                self.0.disable_input()
-            }
-            fn deactivate_to_low_power(&self) {
-                self.0.deactivate_to_low_power()
-            }
-            fn set_floating_state(&self, _: kernel::hil::gpio::FloatingState) {
-                unimplemented!() // not sure what it looks like with inversion
-            }
-            fn floating_state(&self) -> kernel::hil::gpio::FloatingState {
-                unimplemented!() // not sure what it looks like with inversion
-            }
-        }
-        impl<'a, P: hil::gpio::Pin> hil::gpio::Output for Inverted<'a, P> {
-            fn set(&self) {
-                self.0.clear()
-            }
-            fn clear(&self) {
-                self.0.set()
-            }
-            fn toggle(&self) -> bool {
-                self.0.toggle()
-            }
-        }
-        impl<'a, P: hil::gpio::Pin> hil::gpio::Input for Inverted<'a, P> {
-            fn read(&self) -> bool {
-                !self.0.read()
-            }
-        }
+        
+        use components::lpm013m126::Inverted;
         
         let chip_select = static_init!(
             Inverted<'static, nrf52840::gpio::GPIOPin>,
