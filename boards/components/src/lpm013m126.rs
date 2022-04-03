@@ -118,7 +118,7 @@ macro_rules! lpm013m126_component_helper {
             VirtualSpiMasterDevice<'static, $S>,
         >);
 
-        (alarm, &mut BUFFER, spi_device, mux_spi, lpm013m126)
+        (alarm, &mut BUFFER, spi_device, mux_spi, chip_select, lpm013m126)
     }};
 }
 
@@ -146,6 +146,7 @@ impl<A, P, S> Component for Lpm013m126Component<A, P, S>
         &'static mut [u8],
         &'static VirtualSpiMasterDevice<'static, S>,
         &'static MuxSpiMaster<'static, S>,
+        &'static Inverted<'static, P>,
         StaticUninitializedBuffer<
             Lpm013m126<'static, VirtualMuxAlarm<'static, A>, P, VirtualSpiMasterDevice<'static, S>>
         >,
@@ -154,7 +155,7 @@ impl<A, P, S> Component for Lpm013m126Component<A, P, S>
         = &'static Lpm013m126<'static, VirtualMuxAlarm<'static, A>, P, VirtualSpiMasterDevice<'static, S>>;
 
     unsafe fn finalize(self, s: Self::StaticInput) -> Self::Output {
-        let (alarm, buffer, spi_device, mux_spi, lpm013m126) = s;
+        let (alarm, buffer, spi_device, mux_spi, chip_select, lpm013m126) = s;
         let lpm013m126_alarm = alarm.initialize(
             VirtualMuxAlarm::new(self.alarm_mux)
         );
