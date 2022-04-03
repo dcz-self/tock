@@ -90,13 +90,22 @@ impl<'a, P: gpio::Pin> gpio::Input for Inverted<'a, P> {
 /// Setup static space for the driver and its requirements.
 #[macro_export]
 macro_rules! lpm013m126_component_helper {
-    ($A:ty, $P:ty, $S:ty $(,)?) => {{
+    ($A:ty, $P:ty, $S:ty, $mux_spi:expr, $chip_select:expr $(,)?) => {{
         use capsules::lpm013m126::{BUFFER_SIZE, Lpm013m126};
         use capsules::virtual_alarm::VirtualMuxAlarm;
         use kernel::static_buf;
 
         let alarm = static_buf!(VirtualMuxAlarm<'static, $A>);
         static mut BUFFER: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
+
+        let spi_device = static_init!(
+            VirtualSpiMasterDevice<'static, nrf52840::spi::SPIM>,
+            VirtualSpiMasterDevice::new(
+                $mux_spi,
+                $chip_select,
+            ),
+        );
+        spi_device.setup();
 
         let lpm013m126 = static_buf!(Lpm013m126<
             'static,
@@ -105,7 +114,7 @@ macro_rules! lpm013m126_component_helper {
             $S,
         >);
 
-        (alarm, &mut BUFFER, lpm013m126)
+        (alarm, &mut BUFFER, spi_device, lpm013m126)
     }};
 }
 
@@ -115,7 +124,8 @@ pub struct Lpm013m126Component<A, P, S>
     P: 'static + gpio::Pin,P: gpio::Pin,
     S: 'static + SpiMasterDevice,
 {
-    pub spi: &'static S,
+    //pub spi: &'static S,
+    pub spi: core::marker::PhantomData<S>,
     pub disp: &'static P,
     pub extcomin: &'static P,
     pub alarm_mux: &'static MuxAlarm<'static, A>,
@@ -130,6 +140,7 @@ impl<A, P, S> Component for Lpm013m126Component<A, P, S>
     type StaticInput = (
         StaticUninitializedBuffer<VirtualMuxAlarm<'static, A>>,
         &'static mut [u8],
+        &'static S,
         StaticUninitializedBuffer<
             Lpm013m126<'static, VirtualMuxAlarm<'static, A>, P, S>
         >,
@@ -138,19 +149,20 @@ impl<A, P, S> Component for Lpm013m126Component<A, P, S>
         = &'static Lpm013m126<'static, VirtualMuxAlarm<'static, A>, P, S>;
 
     unsafe fn finalize(self, s: Self::StaticInput) -> Self::Output {
-        let lpm013m126_alarm = s.0.initialize(
+        let (alarm, buffer, spi_device, lpm013m126) = s;
+        let lpm013m126_alarm = alarm.initialize(
             VirtualMuxAlarm::new(self.alarm_mux)
         );
         lpm013m126_alarm.setup();
-
-        let lpm013m126 = s.2.initialize(Lpm013m126::new(
-            self.spi,
+        
+        let lpm013m126 = lpm013m126.initialize(Lpm013m126::new(
+            spi_device,
             self.extcomin,
             self.disp,
             lpm013m126_alarm,
-            s.1,
+            buffer,
         ));
-        self.spi.set_client(lpm013m126);
+        spi_device.set_client(lpm013m126);
         lpm013m126_alarm.set_alarm_client(lpm013m126);
 
         lpm013m126

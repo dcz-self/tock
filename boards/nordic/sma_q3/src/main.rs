@@ -482,18 +482,9 @@ pub unsafe fn main() {
             Inverted(&nrf52840_peripherals.gpio_port[Pin::P0_05]),
         );
 
-        let spi_device = static_init!(
-            VirtualSpiMasterDevice<'static, nrf52840::spi::SPIM>,
-            VirtualSpiMasterDevice::new(
-                mux_spi,
-                chip_select,
-            ),
-        );
-        spi_device.setup();
-
         let display
             = components::lpm013m126::Lpm013m126Component {
-                spi: spi_device,
+                spi: Default::default(),
                 disp: &nrf52840_peripherals.gpio_port[Pin::P0_07],
                 extcomin: &nrf52840_peripherals.gpio_port[Pin::P0_06],
                 alarm_mux: mux_alarm,
@@ -503,6 +494,7 @@ pub unsafe fn main() {
                     nrf52840::rtc::Rtc<'static>,
                     nrf52840::gpio::GPIOPin,
                     VirtualSpiMasterDevice<'static, nrf52840::spi::SPIM>,
+                    mux_spi, chip_select,
                 ),
             );
 
