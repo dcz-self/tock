@@ -482,7 +482,12 @@ pub unsafe fn main() {
             Inverted(&nrf52840_peripherals.gpio_port[Pin::P0_05]),
         );
 
-        let display
+        let display: &'static capsules::lpm013m126::Lpm013m126<
+            'static,
+            VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>,
+            nrf52840::gpio::GPIOPin<'_>,
+            VirtualSpiMasterDevice<'static, nrf52840::spi::SPIM>
+        >
             = components::lpm013m126::Lpm013m126Component {
                 spi: Default::default(),
                 disp: &nrf52840_peripherals.gpio_port[Pin::P0_07],

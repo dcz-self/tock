@@ -32,7 +32,7 @@
 
 use capsules::lpm013m126::Lpm013m126;
 use capsules::virtual_alarm::{MuxAlarm, VirtualMuxAlarm};
-use core::mem::MaybeUninit;
+use capsules::virtual_spi::MuxSpiMaster;
 use kernel::component::Component;
 use kernel::hil::gpio;
 use kernel::hil::spi::{SpiMasterDevice};
@@ -145,6 +145,7 @@ impl<A, P, S> Component for Lpm013m126Component<A, P, S>
         StaticUninitializedBuffer<VirtualMuxAlarm<'static, A>>,
         &'static mut [u8],
         &'static S,
+        //&'static MuxSpiMaster<'static, S>,
         StaticUninitializedBuffer<
             Lpm013m126<'static, VirtualMuxAlarm<'static, A>, P, S>
         >,
