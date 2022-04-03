@@ -103,6 +103,7 @@ pub struct Platform {
     >,
     console: &'static capsules::console::Console<'static>,
     gpio: &'static capsules::gpio::GPIO<'static, nrf52840::gpio::GPIOPin<'static>>,
+    screen: &'static capsules::screen::Screen<'static>,
     led: &'static capsules::led::LedDriver<
         'static,
         LedHigh<'static, nrf52840::gpio::GPIOPin<'static>>,
@@ -140,6 +141,7 @@ impl SyscallDriverLookup for Platform {
             capsules::analog_comparator::DRIVER_NUM => f(Some(self.analog_comparator)),
             capsules::block_storage_driver::DRIVER_NUM => f(Some(self.block_storage)),
             gnss::DRIVER_NUM => f(Some(self.gnss)),
+            capsules::screen::DRIVER_NUM => f(Some(self.screen)),
             kernel::ipc::DRIVER_NUM => f(Some(&self.ipc)),
             _ => f(None),
         }
@@ -452,7 +454,7 @@ pub unsafe fn main() {
             4096,
         ));
 
-    let display = {
+    let screen = {
         use capsules::virtual_spi::VirtualSpiMasterDevice;
 
         let mux_spi
@@ -504,7 +506,17 @@ pub unsafe fn main() {
             );
 
         dbg!(display.initialize());
-        display
+        
+        // userspace
+        let screen
+            = components::screen::ScreenComponent::new(
+                board_kernel,
+                capsules::driver::NUM::Screen as usize,
+                display,
+                None,
+            )
+            .finalize(components::screen_buffer_size!(4096));
+        screen
     };
     
     let gnss = {
@@ -620,6 +632,7 @@ pub unsafe fn main() {
         gnss,
         pconsole,
         console,
+        screen,
         led,
         gpio,
         rng,
