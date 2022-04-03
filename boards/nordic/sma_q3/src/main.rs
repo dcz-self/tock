@@ -475,13 +475,6 @@ pub unsafe fn main() {
             nrf52840::pinmux::Pinmux::new(Pin::P0_26 as u32),
         );
         
-        use components::lpm013m126::Inverted;
-        
-        let chip_select = static_init!(
-            Inverted<'static, nrf52840::gpio::GPIOPin>,
-            Inverted(&nrf52840_peripherals.gpio_port[Pin::P0_05]),
-        );
-
         let c: components::lpm013m126::Lpm013m126Component<
             nrf52840::rtc::Rtc<'static>,
             nrf52840::gpio::GPIOPin<'_>,
@@ -506,7 +499,8 @@ pub unsafe fn main() {
                     nrf52840::rtc::Rtc<'static>,
                     nrf52840::gpio::GPIOPin,
                     nrf52840::spi::SPIM,
-                    mux_spi, chip_select,
+                    mux_spi, 
+                    &nrf52840_peripherals.gpio_port[Pin::P0_05],
                 ),
             );
 

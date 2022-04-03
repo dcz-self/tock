@@ -92,17 +92,23 @@ macro_rules! lpm013m126_component_helper {
     ($A:ty, $P:ty, $S:ty, $mux_spi:expr, $chip_select:expr $(,)?) => {{
         use capsules::lpm013m126::{BUFFER_SIZE, Lpm013m126};
         use capsules::virtual_alarm::VirtualMuxAlarm;
-        use capsules::virtual_spi::MuxSpiMaster;
+        use capsules::virtual_spi::VirtualSpiMasterDevice;
+        use components::lpm013m126::Inverted;
         use kernel::static_buf;
 
         let alarm = static_buf!(VirtualMuxAlarm<'static, $A>);
         static mut BUFFER: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
         
+        let chip_select = static_init!(
+            Inverted<'static, $P>,
+            Inverted($chip_select),
+        );
+
         let spi_device = static_init!(
             VirtualSpiMasterDevice<'static, $S>,
             VirtualSpiMasterDevice::new(
                 $mux_spi,
-                $chip_select,
+                chip_select,
             ),
         );
         spi_device.setup();
