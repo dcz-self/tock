@@ -32,10 +32,10 @@
 
 use capsules::lpm013m126::Lpm013m126;
 use capsules::virtual_alarm::{MuxAlarm, VirtualMuxAlarm};
-use capsules::virtual_spi::MuxSpiMaster;
+use capsules::virtual_spi::{MuxSpiMaster, VirtualSpiMasterDevice};
 use kernel::component::Component;
 use kernel::hil::gpio;
-use kernel::hil::spi::{SpiMasterDevice};
+use kernel::hil::spi::{SpiMaster, SpiMasterDevice};
 use kernel::hil::time::Alarm;
 use kernel::utilities::static_init::StaticUninitializedBuffer;
 
@@ -126,7 +126,7 @@ pub struct Lpm013m126Component<A, P, S>
     where
     A: 'static + Alarm<'static>,
     P: 'static + gpio::Pin,P: gpio::Pin,
-    S: 'static + SpiMasterDevice,
+    S: 'static + SpiMaster,
 {
     //pub spi: &'static S,
     pub spi: core::marker::PhantomData<S>,
@@ -139,19 +139,19 @@ impl<A, P, S> Component for Lpm013m126Component<A, P, S>
     where
     A: 'static + Alarm<'static>,
     P: 'static + gpio::Pin,
-    S: 'static + SpiMasterDevice,
+    S: 'static + SpiMaster,
 {
     type StaticInput = (
         StaticUninitializedBuffer<VirtualMuxAlarm<'static, A>>,
         &'static mut [u8],
-        &'static S,
+        &'static VirtualSpiMasterDevice<'static, S>,
         //&'static MuxSpiMaster<'static, S>,
         StaticUninitializedBuffer<
-            Lpm013m126<'static, VirtualMuxAlarm<'static, A>, P, S>
+            Lpm013m126<'static, VirtualMuxAlarm<'static, A>, P, VirtualSpiMasterDevice<'static, S>>
         >,
     );
     type Output
-        = &'static Lpm013m126<'static, VirtualMuxAlarm<'static, A>, P, S>;
+        = &'static Lpm013m126<'static, VirtualMuxAlarm<'static, A>, P, VirtualSpiMasterDevice<'static, S>>;
 
     unsafe fn finalize(self, s: Self::StaticInput) -> Self::Output {
         let (alarm, buffer, spi_device, lpm013m126) = s;

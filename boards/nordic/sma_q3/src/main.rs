@@ -485,7 +485,7 @@ pub unsafe fn main() {
         let c: components::lpm013m126::Lpm013m126Component<
             nrf52840::rtc::Rtc<'static>,
             nrf52840::gpio::GPIOPin<'_>,
-            VirtualSpiMasterDevice<'static, nrf52840::spi::SPIM>,
+            nrf52840::spi::SPIM,
         >
         = components::lpm013m126::Lpm013m126Component {
             spi: Default::default(),
