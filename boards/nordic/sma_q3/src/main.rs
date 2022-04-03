@@ -486,6 +486,7 @@ pub unsafe fn main() {
             &nrf52840_peripherals.gpio_port[Pin::P0_07],
             &nrf52840_peripherals.gpio_port[Pin::P0_06],
             mux_alarm,
+            dynamic_deferred_caller,
         );
         
         let display: &'static capsules::lpm013m126::Lpm013m126<

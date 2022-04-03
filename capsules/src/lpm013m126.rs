@@ -11,10 +11,11 @@
 
 use core::cell::Cell;
 use kernel::debug;
-use kernel::hil::gpio::Pin;
-use kernel::hil::screen::{
-    Screen, ScreenClient, ScreenPixelFormat, ScreenRotation,
+use kernel::dynamic_deferred_call::{
+    DeferredCallHandle, DynamicDeferredCall, DynamicDeferredCallClient,
 };
+use kernel::hil::gpio::Pin;
+use kernel::hil::screen::{Screen, ScreenClient, ScreenPixelFormat, ScreenRotation};
 use kernel::hil::spi::{SpiMasterClient, SpiMasterDevice};
 use kernel::hil::time::{Alarm, AlarmClient, ConvertTicks};
 use kernel::utilities::cells::{OptionalCell, TakeCell};
@@ -46,17 +47,16 @@ impl<'a> FrameBuffer<'a> {
     fn new(frame_buffer: &'a mut [u8]) -> Self {
         Self { data: frame_buffer }
     }
-    
+
     /// Initialize header bytes for each line.
     fn initialize(&mut self) {
         for i in 0..176 {
             let line = self.get_line_mut(i);
-            let bytes
-                = CommandHeader {
-                    mode: Mode::Input1Bit,
-                    gate_line: i,
-                }
-                .encode();
+            let bytes = CommandHeader {
+                mode: Mode::Input1Bit,
+                gate_line: i,
+            }
+            .encode();
             line[..2].copy_from_slice(&bytes);
         }
     }
@@ -76,21 +76,21 @@ impl<'a> FrameBuffer<'a> {
             row[..(source.len())].copy_from_slice(source);
         }
     }
-    
+
     /// Gets an entire raw line, ready to send.
     fn get_line_mut(&mut self, index: u16) -> &mut [u8] {
-        const cmd: usize = 2;
-        const transfer_period: usize = 2;
-        let line_bytes = cmd + 176 / 8;
-        &mut self.data[(line_bytes * index as usize)..][..line_bytes + transfer_period]
+        const CMD: usize = 2;
+        const TRANSFER_PERIOD: usize = 2;
+        let line_bytes = CMD + 176 / 8;
+        &mut self.data[(line_bytes * index as usize)..][..line_bytes + TRANSFER_PERIOD]
     }
-    
+
     /// Gets pixel data.
     fn get_row_mut(&mut self, index: u16) -> &mut [u8] {
         let line_bytes = 176 / 8 + 2;
         &mut self.data[(line_bytes * index as usize + 2)..][..(176 / 8)]
     }
-    
+
     /// Transform into a view of raw data for submitting to the DMA driver
     fn with_raw_rows(
         frame_buffer: FrameBuffer<'static>,
@@ -105,6 +105,7 @@ impl<'a> FrameBuffer<'a> {
 
 /// Modes are 6-bit, network order.
 /// They use a tree-ish encoding, so only the ones in use are listed here.
+#[allow(dead_code)]
 #[derive(Clone, Copy)]
 enum Mode {
     /// Clear memory
@@ -143,9 +144,6 @@ struct WriteFrame {
     height: u16,
 }
 
-/// Position within the write frame, rows first.
-type Position = u16;
-
 /// Internal state of the driver.
 /// Each state can lead to the next one in order of appearance.
 #[derive(Debug, Copy, Clone)]
@@ -169,7 +167,14 @@ pub struct Lpm013m126<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> {
     disp: &'a P,
 
     state: Cell<State>,
-    
+
+    /// This is responsible for sending callbacks
+    /// for actions completed in software.
+    deferred_caller: &'a DynamicDeferredCall,
+    command_complete_callback: OptionalCell<DeferredCallHandle>,
+    /// Holds the handle and the pending call parameter.
+    write_complete_callback: OptionalCell<(DeferredCallHandle, Option<Result<(), ErrorCode>>)>,
+
     /// The HIL requires updates to arbitrary rectangles.
     /// The display supports only updating entire rows,
     /// so edges need to be cached.
@@ -184,13 +189,17 @@ pub struct Lpm013m126<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> {
     alarm: &'a A,
 }
 
-impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> Lpm013m126<'a, A, P, S> {
+impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> Lpm013m126<'a, A, P, S>
+where
+    Self: 'static,
+{
     /// Caution: passing `frame_buffer` that's too small will panic.
     pub fn new(
         spi: &'a S,
         extcomin: &'a P,
         disp: &'a P,
         alarm: &'a A,
+        deferred_caller: &'a DynamicDeferredCall,
         frame_buffer: &'static mut [u8],
     ) -> Self {
         Self {
@@ -198,6 +207,9 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> Lpm013m126<'a, A, P, S> {
             alarm: alarm,
             disp,
             extcomin,
+            deferred_caller,
+            command_complete_callback: OptionalCell::empty(),
+            write_complete_callback: OptionalCell::empty(),
             frame_buffer: OptionalCell::new(FrameBuffer::new(frame_buffer)),
             buffer: TakeCell::empty(),
             client: OptionalCell::empty(),
@@ -205,7 +217,7 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> Lpm013m126<'a, A, P, S> {
         }
     }
 
-    pub fn initialize(&self) -> Result<(), ErrorCode> {
+    pub fn initialize(&'static self) -> Result<(), ErrorCode> {
         match self.state.get() {
             State::Uninitialized | State::Bug => {
                 // Even if we took Pin type that implemets Output,
@@ -220,6 +232,28 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> Lpm013m126<'a, A, P, S> {
                 self.disp.make_output();
                 self.disp.clear();
 
+                self.command_complete_callback.insert(
+                    self.command_complete_callback
+                        .extract()
+                        .or_else(|| self.deferred_caller.register(self)),
+                );
+                if self.command_complete_callback.is_none() {
+                    return Err(ErrorCode::NOMEM);
+                }
+
+                self.write_complete_callback.insert(
+                    self.write_complete_callback
+                        .extract()
+                        .or_else(|| self.deferred_caller.register(self).map(|h| (h, None))),
+                );
+                if self.write_complete_callback.is_none() {
+                    return Err(ErrorCode::NOMEM);
+                }
+                // TODO: handles should maybe get unregistered on drop.
+                // Ideally they should unregister RAII style, but I'm not sure how.
+                // Perhaps in new().
+                // The deferred caller doesn't support unregistering anyway.
+
                 match self.frame_buffer.take() {
                     None => Err(ErrorCode::NOMEM),
                     Some(mut frame_buffer) => {
@@ -232,13 +266,12 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> Lpm013m126<'a, A, P, S> {
                                 mode: Mode::AllClear,
                                 gate_line: 0,
                             }
-                            .encode()
+                            .encode(),
                         );
                         let l = FrameBuffer::with_raw_rows(frame_buffer, 0, 1);
                         let res = self.spi.read_write_bytes(
-                            l,//FrameBuffer::with_raw_rows(frame_buffer, 0, 1),
-                            None,
-                            2,
+                            l, //FrameBuffer::with_raw_rows(frame_buffer, 0, 1),
+                            None, 2,
                         );
 
                         let (res, new_state) = match res {
@@ -250,13 +283,22 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> Lpm013m126<'a, A, P, S> {
                         };
                         self.state.set(new_state);
                         res
-                    },
+                    }
                 }
-            },
+            }
             _ => Err(ErrorCode::ALREADY),
         }
     }
-    
+
+    fn call_write_complete(&self, ret: Result<(), ErrorCode>) -> Option<bool> {
+        if let Some((handle, None)) = self.write_complete_callback.extract() {
+            self.write_complete_callback.set((handle, Some(ret)));
+            self.deferred_caller.set(handle)
+        } else {
+            None
+        }
+    }
+
     fn arm_alarm(&self) {
         // Datasheet says 120Hz or more often flipping is required
         // for transmissive mode.
@@ -265,7 +307,10 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> Lpm013m126<'a, A, P, S> {
     }
 }
 
-impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> Screen for Lpm013m126<'a, A, P, S> {
+impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> Screen for Lpm013m126<'a, A, P, S>
+where
+    Self: 'static,
+{
     fn get_resolution(&self) -> (usize, usize) {
         (176, 176)
     }
@@ -287,9 +332,7 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> Screen for Lpm013m126<'a, A, 
     ) -> Result<(), ErrorCode> {
         let rows = 176;
         let columns = 176;
-        if y >= rows || y + height >= rows
-            || x >= columns || x + width >= columns
-        {
+        if y >= rows || y + height >= rows || x >= columns || x + width >= columns {
             return Err(ErrorCode::INVAL);
         }
 
@@ -303,37 +346,48 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> Screen for Lpm013m126<'a, A, 
         let mut new_state = None;
         let ret = match self.state.get() {
             State::Uninitialized => Err(ErrorCode::OFF),
-            State::InitializingPixelMemory
-            | State::InitializingRest => Err(ErrorCode::BUSY),
+            State::InitializingPixelMemory | State::InitializingRest => Err(ErrorCode::BUSY),
             State::Idle(..) => {
                 new_state = Some(State::Idle(frame));
                 Ok(())
-            },
+            }
             State::Writing(..) => {
                 new_state = Some(State::Writing(frame));
                 Ok(())
-            },
+            }
             State::Bug => Err(ErrorCode::FAIL),
+        };
+
+        match self
+            .command_complete_callback
+            .extract()
+            .and_then(|handle| self.deferred_caller.set(handle))
+        {
+            Some(true) => {}
+            other => {
+                debug!(
+                    "LPM013M126 can't call command_complete (returned {:?})",
+                    other,
+                );
+                new_state = Some(State::Bug);
+            }
         };
 
         if let Some(new_state) = new_state {
             self.state.set(new_state);
         }
-        // Thankfully, this is the only command that results in the callback,
-        // so there's no danger that this will get attributed
-        // to a command that's not finished yet.
-        self.client.map(|client| client.command_complete(Ok(())));
+
         ret
     }
 
     fn write(&self, buffer: &'static mut [u8], len: usize) -> Result<(), ErrorCode> {
         let ret = match self.state.get() {
             State::Uninitialized => Err(ErrorCode::OFF),
-            State::InitializingPixelMemory
-            | State::InitializingRest => Err(ErrorCode::BUSY),
+            State::InitializingPixelMemory | State::InitializingRest => Err(ErrorCode::BUSY),
             State::Idle(frame) => {
-                self.frame_buffer.take().map_or(Err(ErrorCode::NOMEM),
-                    |mut frame_buffer| {
+                self.frame_buffer
+                    .take()
+                    .map_or(Err(ErrorCode::NOMEM), |mut frame_buffer| {
                         frame_buffer.blit(&buffer[..len], &frame);
                         let send_buf = FrameBuffer::with_raw_rows(
                             frame_buffer,
@@ -349,30 +403,39 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> Screen for Lpm013m126<'a, A, 
                             Err((e, buf, _)) => {
                                 self.frame_buffer.replace(FrameBuffer::new(buf));
                                 (Err(e), State::Idle(frame))
-                            },
+                            }
                         };
                         self.state.set(new_state);
                         ret
-                    }
-                )
-            },
+                    })
+            }
             State::Writing(..) => Err(ErrorCode::BUSY),
             State::Bug => Err(ErrorCode::FAIL),
         };
 
         self.buffer.replace(buffer);
+
         match self.state.get() {
-            State::Writing(..) => {},
-            _ => {
-                self.client.map(|client| self.buffer.take().map(
-                    |buffer| client.write_complete(buffer, ret)
-                ));
-            }
+            State::Writing(..) => {}
+            _ => match self.call_write_complete(ret) {
+                Some(true) => {}
+                other => {
+                    debug!(
+                        "LPM013M126 can't call write_complete (returned {:?})",
+                        other,
+                    );
+                    self.state.set(State::Bug);
+                }
+            },
         };
+
         ret
     }
 
     fn write_continue(&self, buffer: &'static mut [u8], len: usize) -> Result<(), ErrorCode> {
+        // Not TODO: this can be avoided entirely
+        // at the cost of a minor layering violation.
+        // https://github.com/tock/tock/pull/3011#issuecomment-1087766745
         self.write(buffer, len)?;
         // TODO: move position
         Ok(())
@@ -387,7 +450,7 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> Screen for Lpm013m126<'a, A, 
     }
 
     fn set_brightness(&self, _brightness: usize) -> Result<(), ErrorCode> {
-        // TODO
+        // TODO: add LED PWM
         Ok(())
     }
 
@@ -400,7 +463,10 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> Screen for Lpm013m126<'a, A, 
     }
 }
 
-impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> AlarmClient for Lpm013m126<'a, A, P, S> {
+impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> AlarmClient for Lpm013m126<'a, A, P, S>
+where
+    Self: 'static,
+{
     fn alarm(&self) {
         match self.state.get() {
             State::InitializingRest => {
@@ -408,36 +474,46 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> AlarmClient for Lpm013m126<'a
                 // by stretching the flip period.
                 self.extcomin.toggle();
                 self.arm_alarm();
-                let new_state = self.frame_buffer.take()
-                    .map_or_else(
-                        || {
-                            debug!("LPM013M126 driver lost its frame buffer in state {:?}", self.state.get());
-                            State::Bug
-                        },
-                        |mut buffer| {
-                            buffer.initialize();
-                            self.frame_buffer.replace(buffer);
-                            State::Idle(
-                                // The HIL doesn't specify the initial frame
-                                WritePosition { row: 0, column: 0, width: 176, height: 176}
-                            )
-                        }
-                    );
+                let new_state = self.frame_buffer.take().map_or_else(
+                    || {
+                        debug!(
+                            "LPM013M126 driver lost its frame buffer in state {:?}",
+                            self.state.get()
+                        );
+                        State::Bug
+                    },
+                    |mut buffer| {
+                        buffer.initialize();
+                        self.frame_buffer.replace(buffer);
+                        State::Idle(
+                            // The HIL doesn't specify the initial frame
+                            WritePosition {
+                                row: 0,
+                                column: 0,
+                                width: 176,
+                                height: 176,
+                            },
+                        )
+                    },
+                );
 
                 self.state.set(new_state);
 
                 if let State::Idle(..) = new_state {
                     self.client.map(|client| client.screen_is_ready());
                 }
-            },
+            }
             State::Idle(..) | State::Writing(..) => {
                 self.extcomin.toggle();
                 self.arm_alarm();
-            },
+            }
             other => {
-                debug!("LPM013M126 driver got alarm in unexpected state {:?}", other);
+                debug!(
+                    "LPM013M126 driver got alarm in unexpected state {:?}",
+                    other
+                );
                 self.state.set(State::Bug);
-            },
+            }
         };
     }
 }
@@ -448,7 +524,7 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> SpiMasterClient for Lpm013m12
         write_buffer: SubmitBuffer<'static>,
         _read_buffer: Option<&'static mut [u8]>,
         _len: usize,
-        status: Result<(), ErrorCode>,
+        _status: Result<(), ErrorCode>,
     ) {
         self.frame_buffer.replace(FrameBuffer::new(write_buffer));
         self.state.set(match self.state.get() {
@@ -462,17 +538,53 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> SpiMasterClient for Lpm013m12
                 let delay = self.alarm.ticks_from_us(200);
                 self.alarm.set_alarm(self.alarm.now(), delay);
                 State::InitializingRest
-            },
+            }
             State::Writing(frame) => State::Idle(frame),
             // can't get more buggy than buggy
             other => {
-                debug!("LPM013M126 received unexpected SPI complete in state {:?}", other);
+                debug!(
+                    "LPM013M126 received unexpected SPI complete in state {:?}",
+                    other
+                );
                 State::Bug
-            },
+            }
         });
+        /*
+        Useless at the moment, a write to the frame buffer was already required,
+        and that calls write_complete uncondtionally.
+                self.client.map(|client| {
+                    self.buffer
+                        .take()
+                        .map(|buf| client.write_complete(buf, status))
+                });
+        */
+    }
+}
 
-        self.client.map(|client|{
-            self.buffer.take().map(|buf| client.write_complete(buf, status))}
-        );
+impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> DynamicDeferredCallClient
+    for Lpm013m126<'a, A, P, S>
+{
+    fn call(&self, handle: DeferredCallHandle) {
+        if Some(handle) == self.command_complete_callback.extract() {
+            // Thankfully, this is the only command that results in the callback,
+            // so there's no danger that this will get attributed
+            // to a command that's not finished yet.
+            self.client.map(|client| client.command_complete(Ok(())));
+        } else if let Some((handle, Some(arg))) = self.write_complete_callback.extract() {
+            self.client.map(|client| {
+                self.buffer
+                    .take()
+                    .map(|buffer| client.write_complete(buffer, arg));
+                self.write_complete_callback.replace((handle, None));
+            });
+        } else {
+            debug!(
+                "LPM013M126 received deferred call impossible to handle. State: {:?}, command: {:?}, write: {:?}",
+                self.state.get(),
+                self.command_complete_callback.extract(),
+                self.write_complete_callback.extract(),
+            );
+            self.state.set(State::Bug)
+        }
     }
 }

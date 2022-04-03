@@ -261,5 +261,5 @@ pub trait DynamicDeferredCallClient {
 
 /// Unique identifier for a deferred call registered with a
 /// [DynamicDeferredCall](crate::dynamic_deferred_call::DynamicDeferredCall)
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub struct DeferredCallHandle(usize);
