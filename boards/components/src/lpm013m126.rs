@@ -100,12 +100,13 @@ macro_rules! lpm013m126_component_helper {
         static mut BUFFER: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
 
         let mux_spi: &MuxSpiMaster<'static, $S> = $mux_spi;
+        let chip_select: &Inverted<'static, $P> = $chip_select;
         
         let spi_device = static_init!(
             VirtualSpiMasterDevice<'static, $S>,
             VirtualSpiMasterDevice::new(
                 mux_spi,
-                $chip_select,
+                chip_select,
             ),
         );
         spi_device.setup();
