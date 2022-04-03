@@ -99,7 +99,7 @@ macro_rules! lpm013m126_component_helper {
         static mut BUFFER: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
 
         let spi_device = static_init!(
-            VirtualSpiMasterDevice<'static, nrf52840::spi::SPIM>,
+            VirtualSpiMasterDevice<'static, $S>,
             VirtualSpiMasterDevice::new(
                 $mux_spi,
                 $chip_select,
@@ -111,7 +111,7 @@ macro_rules! lpm013m126_component_helper {
             'static,
             VirtualMuxAlarm<'static, $A>,
             $P,
-            $S,
+            VirtualSpiMasterDevice<'static, $S>,
         >);
 
         (alarm, &mut BUFFER, spi_device, lpm013m126)

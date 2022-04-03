@@ -493,7 +493,7 @@ pub unsafe fn main() {
                 components::lpm013m126_component_helper!(
                     nrf52840::rtc::Rtc<'static>,
                     nrf52840::gpio::GPIOPin,
-                    VirtualSpiMasterDevice<'static, nrf52840::spi::SPIM>,
+                    nrf52840::spi::SPIM,
                     mux_spi, chip_select,
                 ),
             );
