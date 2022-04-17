@@ -30,11 +30,24 @@ The screen driver allows the process to write data to a framebuffer of a screen.
 
     **Returns**: SUCCESS_U32 with 1 if yes, and 0 if no
 
+  * ### Command number: `2`
+
+    **Description**: Set power
+
+    **Argument 1**: 0 if off, nonzero if on.
+
+    **Argument 2**: unused
+
+    **Returns**: Ok(()) followed by the ready callback if the command was successful,
+    BUSY if another command is in progress,
+    INVAL if a brightness value is required but wasn't provided.
+
   * ### Command number: `3`
 
     **Description**: Set brightness
 
-    **Argument 1**: Percent of brightness, 0% should turn off the screen, greater than 0% should turn it on.
+    **Argument 1**: Lightness value, relative to minimum supported.
+    0 should turn off the light if available, greater than 0 should turn it on.
 
     **Argument 2**: unused
 

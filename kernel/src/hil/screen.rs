@@ -207,11 +207,29 @@ pub trait Screen {
     /// Set the object to receive the asynchronous command callbacks.
     fn set_client(&self, client: Option<&'static dyn ScreenClient>);
 
-    /// Sets the display brightness and/or powers it off
-    /// Screens must implement this function for at least two brightness values (in percent)
-    ///     0 - power off,
-    ///     otherwise - on, set brightness (if available)
+    /// Sets the display brightness value
+    ///
+    /// Displays should implement this function for at least 0 and 1.
+    /// - 0 - completely no light emitted
+    /// - otherwise - on, set brightness to the value
+    ///
+    /// The display should interpret the brightness value as *lightness*
+    /// (each increment should change preceived brightness the same).
     fn set_brightness(&self, brightness: usize) -> Result<(), ErrorCode>;
+
+    /// Controls the screen power supply.
+    ///
+    /// Use it to initialize the display device.
+    ///
+    /// Does not control backlight power (if applicable),
+    /// so call `set_brightness` to turn on/off the module completely.
+    ///
+    /// For displays where power needs nonzero brightness,
+    /// this may return `INVAL` if `set_brightness` was not called first.
+    ///
+    /// When finished, calls `ScreenClient::screen_is_ready`,
+    /// both when power was enabled and disabled.
+    fn set_power(&self, enabled: bool) -> Result<(), ErrorCode>;
 
     /// Inverts the colors.
     fn invert_on(&self) -> Result<(), ErrorCode>;
