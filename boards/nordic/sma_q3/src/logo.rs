@@ -1,5 +1,9 @@
 /*! Shows Jazda logo in 1-bit */
-use kernel::ErrorCode;
+use capsules::virtual_alarm::VirtualMuxAlarm;
+use kernel::{ debug, ErrorCode, static_init };
+use kernel::hil::screen::Screen;
+use capsules::virtual_spi::VirtualSpiMasterDevice;
+use crate::dbg;
 
 struct D<S: 'static + kernel::hil::time::Alarm<'static>, P: 'static + kernel::hil::gpio::Pin, B: 'static + kernel::hil::spi::SpiMasterDevice>(
     &'static capsules::lpm013m126::Lpm013m126<'static, S, P, B>
@@ -22,10 +26,12 @@ impl<S: 'static + kernel::hil::time::Alarm<'static>, P: 'static + kernel::hil::g
         debug!("Write complete");
     }
 }
-use kernel::hil::screen::Screen;
-use capsules::virtual_spi::VirtualSpiMasterDevice;
 
-unsafe fn<DS: Screen> init_logo_once(display: DS) {
+pub unsafe fn init_logo_once(display: &'static capsules::lpm013m126::Lpm013m126<
+    'static, VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>,
+    nrf52840::gpio::GPIOPin,
+    VirtualSpiMasterDevice<'static, nrf52840::spi::SPIM>
+>) {
     debug!("Display started");
     let cd = static_init!(
         D<
