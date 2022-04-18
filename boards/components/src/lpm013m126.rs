@@ -197,6 +197,7 @@ where
         ));
         spi_device.set_client(lpm013m126);
         lpm013m126_alarm.set_alarm_client(lpm013m126);
+        lpm013m126.setup().unwrap();
         lpm013m126
     }
 }

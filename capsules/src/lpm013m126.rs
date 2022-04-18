@@ -133,7 +133,28 @@ impl CommandHeader {
     }
 }
 
-type WritePosition = WriteFrame;
+/// Schedules a deferred call with no arguments.
+/// This is separate from the device to make sure no other state is modified.
+fn schedule_deferred(
+    caller: &DynamicDeferredCall,
+    callback: &OptionalCell<DeferredCallHandle>,
+    name: &str,
+) -> Result<(), ()> {
+    match callback
+        .extract()
+        .and_then(|handle| caller.set(handle))
+    {
+        Some(true) => Ok(()),
+        other => {
+            debug!(
+                "LPM013M126 can't call {} (returned {:?})",
+                name,
+                other,
+            );
+            Err(())
+        }
+    }
+}
 
 /// Area of the screen to which data is written
 #[derive(Debug, Copy, Clone)]
@@ -148,7 +169,11 @@ struct WriteFrame {
 /// Each state can lead to the next one in order of appearance.
 #[derive(Debug, Copy, Clone)]
 enum State {
+    /// Data structures not ready, call `setup`
     Uninitialized,
+
+    /// Display hardware is off, uninitialized.
+    Off,
     InitializingPixelMemory,
     /// COM polarity and internal latch circuits
     InitializingRest,
@@ -157,7 +182,7 @@ enum State {
     Idle(WriteFrame),
     Writing(WriteFrame),
 
-    /// This driver is buggy. Resetting will try to recover it.
+    /// This driver is buggy. Turning off and on will try to recover it.
     Bug,
 }
 
@@ -171,6 +196,7 @@ pub struct Lpm013m126<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> {
     /// This is responsible for sending callbacks
     /// for actions completed in software.
     deferred_caller: &'a DynamicDeferredCall,
+    ready_callback: OptionalCell<DeferredCallHandle>,
     command_complete_callback: OptionalCell<DeferredCallHandle>,
     /// Holds the handle and the pending call parameter.
     write_complete_callback: OptionalCell<(DeferredCallHandle, Option<Result<(), ErrorCode>>)>,
@@ -185,7 +211,7 @@ pub struct Lpm013m126<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> {
     /// It's not submitted directly anywhere.
     buffer: TakeCell<'static, [u8]>,
 
-    /// Needed forinit and to flip the EXTCOMIN pin at regular intervals
+    /// Needed for init and to flip the EXTCOMIN pin at regular intervals
     alarm: &'a A,
 }
 
@@ -208,6 +234,7 @@ where
             disp,
             extcomin,
             deferred_caller,
+            ready_callback: OptionalCell::empty(),
             command_complete_callback: OptionalCell::empty(),
             write_complete_callback: OptionalCell::empty(),
             frame_buffer: OptionalCell::new(FrameBuffer::new(frame_buffer)),
@@ -216,21 +243,24 @@ where
             state: Cell::new(State::Uninitialized),
         }
     }
-
-    pub fn initialize(&'static self) -> Result<(), ErrorCode> {
+    
+    /// Set up internal data structures.
+    /// Does not touch the hardware.
+    /// Idempotent.
+    pub fn setup(&'static self) -> Result<(), ErrorCode> {
+        // Needed this way to avoid exposing accessors to deferred callers.
+        // That would be unnecessary, no external data is needed.
+        // At the same time, self must be static for client registration.
         match self.state.get() {
-            State::Uninitialized | State::Bug => {
-                // Even if we took Pin type that implemets Output,
-                // it's still possible that it is *not configured as a output*
-                // at the moment.
-                // To ensure outputness, output must be configured at runtime,
-                // even though this eliminates pins
-                // which don't implement Configure due to being
-                // simple, unconfigurable outputs.
-                self.extcomin.make_output();
-                self.extcomin.clear();
-                self.disp.make_output();
-                self.disp.clear();
+            State::Uninitialized => {
+                self.ready_callback.insert(
+                    self.ready_callback
+                        .extract()
+                        .or_else(|| self.deferred_caller.register(self)),
+                );
+                if self.ready_callback.is_none() {
+                    return Err(ErrorCode::NOMEM);
+                }
 
                 self.command_complete_callback.insert(
                     self.command_complete_callback
@@ -253,7 +283,29 @@ where
                 // Ideally they should unregister RAII style, but I'm not sure how.
                 // Perhaps in new().
                 // The deferred caller doesn't support unregistering anyway.
+                
+                self.state.set(State::Off);
+                Ok(())
+            },
+            _ => Err(ErrorCode::ALREADY),
+        }
+    }
 
+    fn initialize(&self) -> Result<(), ErrorCode> {
+        match self.state.get() {
+            State::Off | State::Bug => {
+                // Even if we took Pin type that implemets Output,
+                // it's still possible that it is *not configured as a output*
+                // at the moment.
+                // To ensure outputness, output must be configured at runtime,
+                // even though this eliminates pins
+                // which don't implement Configure due to being
+                // simple, unconfigurable outputs.
+                self.extcomin.make_output();
+                self.extcomin.clear();
+                self.disp.make_output();
+                self.disp.clear();
+ 
                 match self.frame_buffer.take() {
                     None => Err(ErrorCode::NOMEM),
                     Some(mut frame_buffer) => {
@@ -336,7 +388,7 @@ where
             return Err(ErrorCode::INVAL);
         }
 
-        let frame = WritePosition {
+        let frame = WriteFrame {
             row: y as u16,
             column: x as u16,
             width: width as u16,
@@ -345,7 +397,7 @@ where
 
         let mut new_state = None;
         let ret = match self.state.get() {
-            State::Uninitialized => Err(ErrorCode::OFF),
+            State::Uninitialized | State::Off => Err(ErrorCode::OFF),
             State::InitializingPixelMemory | State::InitializingRest => Err(ErrorCode::BUSY),
             State::Idle(..) => {
                 new_state = Some(State::Idle(frame));
@@ -358,19 +410,14 @@ where
             State::Bug => Err(ErrorCode::FAIL),
         };
 
-        match self
-            .command_complete_callback
-            .extract()
-            .and_then(|handle| self.deferred_caller.set(handle))
-        {
-            Some(true) => {}
-            other => {
-                debug!(
-                    "LPM013M126 can't call command_complete (returned {:?})",
-                    other,
-                );
+        let scheduled = schedule_deferred(
+            self.deferred_caller,
+            &self.command_complete_callback,
+            "command_complete",
+        );
+        
+        if let Err(()) = scheduled {
                 new_state = Some(State::Bug);
-            }
         };
 
         if let Some(new_state) = new_state {
@@ -382,7 +429,7 @@ where
 
     fn write(&self, buffer: &'static mut [u8], len: usize) -> Result<(), ErrorCode> {
         let ret = match self.state.get() {
-            State::Uninitialized => Err(ErrorCode::OFF),
+            State::Uninitialized | State::Off => Err(ErrorCode::OFF),
             State::InitializingPixelMemory | State::InitializingRest => Err(ErrorCode::BUSY),
             State::Idle(frame) => {
                 self.frame_buffer
@@ -449,6 +496,35 @@ where
         }
     }
 
+    fn set_power(&self, enable: bool) -> Result<(), ErrorCode> {
+        let ret = if enable {
+            self.initialize()
+        } else {
+            // TODO: disable DISP, stop EXTCOMIN, clear pixels,
+            // set state to Off
+            Err(ErrorCode::ALREADY)
+        };
+
+        // If the device is in the desired state by now,
+        // then a callback needs to be sent manually.
+        if let Err(ErrorCode::ALREADY) = ret {
+            let scheduled = schedule_deferred(
+                self.deferred_caller,
+                &self.ready_callback,
+                "ready",
+            );
+            
+            if let Err(()) = scheduled {
+                self.state.set(State::Bug);
+                Err(ErrorCode::FAIL)
+            } else {
+                Ok(())
+            }
+        } else {
+            ret
+        }
+    }
+    
     fn set_brightness(&self, _brightness: usize) -> Result<(), ErrorCode> {
         // TODO: add LED PWM
         Ok(())
@@ -487,7 +563,7 @@ where
                         self.frame_buffer.replace(buffer);
                         State::Idle(
                             // The HIL doesn't specify the initial frame
-                            WritePosition {
+                            WriteFrame {
                                 row: 0,
                                 column: 0,
                                 width: 176,
@@ -577,6 +653,8 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> DynamicDeferredCallClient
                     .map(|buffer| client.write_complete(buffer, arg));
                 self.write_complete_callback.replace((handle, None));
             });
+        } else if Some(handle) == self.ready_callback.extract() {
+            self.client.map(|client| client.screen_is_ready());
         } else {
             debug!(
                 "LPM013M126 received deferred call impossible to handle. State: {:?}, command: {:?}, write: {:?}",

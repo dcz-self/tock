@@ -506,8 +506,8 @@ pub unsafe fn main() {
                     &nrf52840_peripherals.gpio_port[Pin::P0_05],
                 ),
             );
-
-        dbg!(display.initialize());
+        use kernel::hil::screen::Screen;
+        dbg!(display.set_power(true));
         logo::init_logo_once(display);
         // userspace
         /*
