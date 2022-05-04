@@ -167,7 +167,7 @@ impl DynamicDeferredCall {
     pub fn set(&self, handle: DeferredCallHandle) -> Option<bool> {
         let DeferredCallHandle(client_pos) = handle;
         let client_state = &self.client_states[client_pos];
-
+crate::debug!("set h{}/{} {:?}", client_pos, self.client_states.len(), client_state.scheduled);
         if let (call_set, true) = (&client_state.scheduled, client_state.client.is_some()) {
             if call_set.get() {
                 // Already set
@@ -232,6 +232,9 @@ impl DynamicDeferredCall {
                     break;
                 }
                 if client_state.scheduled.get() {
+                if i > 0 {
+                crate::debug!("{} is scheduled", i);
+                }
                     client_state.client.map(|client| {
                         client_state.scheduled.set(false);
                         client.call(DeferredCallHandle(i));

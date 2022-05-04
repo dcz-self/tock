@@ -3,7 +3,8 @@ use crate::ErrorCode;
 use core::ops::Add;
 use core::ops::Sub;
 
-#[derive(Copy, Clone, PartialEq)]
+/// Degrees counterclockwise
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub enum ScreenRotation {
     Normal,
     Rotated90,
@@ -59,7 +60,7 @@ impl Sub for ScreenRotation {
     }
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 #[repr(usize)]
 #[allow(non_camel_case_types)]
 pub enum ScreenPixelFormat {

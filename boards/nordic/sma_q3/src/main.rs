@@ -104,7 +104,7 @@ pub struct Platform {
     >,
     console: &'static capsules::console::Console<'static>,
     gpio: &'static capsules::gpio::GPIO<'static, nrf52840::gpio::GPIOPin<'static>>,
-    //screen: &'static capsules::screen::Screen<'static>,
+    screen: &'static capsules::screen::Screen<'static>,
     led: &'static capsules::led::LedDriver<
         'static,
         LedHigh<'static, nrf52840::gpio::GPIOPin<'static>>,
@@ -142,7 +142,7 @@ impl SyscallDriverLookup for Platform {
             capsules::analog_comparator::DRIVER_NUM => f(Some(self.analog_comparator)),
             capsules::block_storage_driver::DRIVER_NUM => f(Some(self.block_storage)),
             gnss::DRIVER_NUM => f(Some(self.gnss)),
-            //capsules::screen::DRIVER_NUM => f(Some(self.screen)),
+            capsules::screen::DRIVER_NUM => f(Some(self.screen)),
             kernel::ipc::DRIVER_NUM => f(Some(&self.ipc)),
             _ => f(None),
         }
@@ -301,7 +301,7 @@ pub unsafe fn main() {
     .finalize(());
 
     let dynamic_deferred_call_clients =
-        static_init!([DynamicDeferredCallClientState; 3], Default::default());
+        static_init!([DynamicDeferredCallClientState; 8], Default::default());
     let dynamic_deferred_caller = static_init!(
         DynamicDeferredCall,
         DynamicDeferredCall::new(dynamic_deferred_call_clients)
@@ -379,14 +379,6 @@ pub unsafe fn main() {
     )
     .finalize(());
 
-    let dynamic_deferred_call_clients =
-        static_init!([DynamicDeferredCallClientState; 5], Default::default());
-    let dynamic_deferred_caller = static_init!(
-        DynamicDeferredCall,
-        DynamicDeferredCall::new(dynamic_deferred_call_clients)
-    );
-    DynamicDeferredCall::set_global_instance(dynamic_deferred_caller);
-    
     let sensors_i2c_bus = static_init!(
         capsules::virtual_i2c::MuxI2C<'static>,
         capsules::virtual_i2c::MuxI2C::new(&base_peripherals.twi1, None, dynamic_deferred_caller)
@@ -507,10 +499,10 @@ pub unsafe fn main() {
                 ),
             );
         use kernel::hil::screen::Screen;
-        dbg!(display.set_power(true));
-        logo::init_logo_once(display);
+        //dbg!(display.set_power(true));
+        //logo::init_logo_once(display);
         // userspace
-        /*
+        
         let screen
             = components::screen::ScreenComponent::new(
                 board_kernel,
@@ -519,7 +511,7 @@ pub unsafe fn main() {
                 None,
             )
             .finalize(components::screen_buffer_size!(4096));
-        screen*/
+        screen
     };
     
     let gnss = {
@@ -635,7 +627,7 @@ pub unsafe fn main() {
         gnss,
         pconsole,
         console,
-        //screen,
+        screen,
         led,
         gpio,
         rng,

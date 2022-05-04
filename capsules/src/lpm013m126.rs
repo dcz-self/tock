@@ -140,6 +140,7 @@ fn schedule_deferred(
     callback: &OptionalCell<DeferredCallHandle>,
     name: &str,
 ) -> Result<(), ()> {
+    debug!("schedule");
     match callback
         .extract()
         .and_then(|handle| caller.set(handle))
@@ -498,8 +499,10 @@ where
 
     fn set_power(&self, enable: bool) -> Result<(), ErrorCode> {
         let ret = if enable {
+            debug!("set init");
             self.initialize()
         } else {
+        debug!("already");
             // TODO: disable DISP, stop EXTCOMIN, clear pixels,
             // set state to Off
             Err(ErrorCode::ALREADY)
@@ -508,6 +511,7 @@ where
         // If the device is in the desired state by now,
         // then a callback needs to be sent manually.
         if let Err(ErrorCode::ALREADY) = ret {
+            debug!("defer");
             let scheduled = schedule_deferred(
                 self.deferred_caller,
                 &self.ready_callback,
@@ -515,12 +519,14 @@ where
             );
             
             if let Err(()) = scheduled {
+                debug!("err");
                 self.state.set(State::Bug);
                 Err(ErrorCode::FAIL)
             } else {
                 Ok(())
             }
         } else {
+            debug!("nodefer");
             ret
         }
     }
@@ -641,6 +647,7 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> DynamicDeferredCallClient
     for Lpm013m126<'a, A, P, S>
 {
     fn call(&self, handle: DeferredCallHandle) {
+        debug!("deferred back");
         if Some(handle) == self.command_complete_callback.extract() {
             // Thankfully, this is the only command that results in the callback,
             // so there's no danger that this will get attributed

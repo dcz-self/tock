@@ -18,7 +18,7 @@ enum Writer {
 static mut WRITER: Writer = Writer::Uninitialized;
 
 fn wait() {
-    for _ in 0..400 {
+    for _ in 0..300 {
         cortexm4::support::nop();
     }
 }

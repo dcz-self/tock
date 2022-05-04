@@ -53,7 +53,7 @@ fn screen_pixel_format_from(screen_pixel_format: usize) -> Option<ScreenPixelFor
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 enum ScreenCommand {
     Nop,
     SetBrightness(usize),
@@ -162,15 +162,23 @@ impl<'a> Screen<'a> {
         {
             Err(e) => CommandReturn::failure(e),
             Ok(r) => {
-                if self.screen_ready.get() && self.current_process.is_none() {
+                let call = || {
                     self.current_process.set(process_id);
                     let r = self.call_screen(command, process_id);
                     if r != Ok(()) {
                         self.current_process.clear();
                     }
                     CommandReturn::from(r)
+                };
+
+                if self.current_process.is_some() {
+                    // I'm not seeing a point in queueing...
+                    // Typically commands need an accurate return value,
+                    // so need immediate access (TODO),
+                    // and those with callbacks can simply return BUSY.
+                    CommandReturn::failure(ErrorCode::BUSY)
                 } else {
-                    r
+                    call()
                 }
             }
         }
@@ -182,6 +190,7 @@ impl<'a> Screen<'a> {
     }
 
     fn call_screen(&self, command: ScreenCommand, process_id: ProcessId) -> Result<(), ErrorCode> {
+    kernel::debug!("callscreen {:?}", command);
         match command {
             ScreenCommand::SetBrightness(brighness) => self.screen.set_brightness(brighness),
             ScreenCommand::SetPower(enabled) => self.screen.set_power(enabled),
@@ -518,7 +527,7 @@ impl<'a> Screen<'a> {
 
 impl<'a> hil::screen::ScreenClient for Screen<'a> {
     fn command_complete(&self, r: Result<(), ErrorCode>) {
-        self.run_next_command(kernel::errorcode::into_statuscode(r), 0, 0);
+        self.run_next_command(2, kernel::errorcode::into_statuscode(r), 0);
     }
 
     fn write_complete(&self, buffer: &'static mut [u8], r: Result<(), ErrorCode>) {
@@ -528,12 +537,13 @@ impl<'a> hil::screen::ScreenClient for Screen<'a> {
             let _ = self.screen.write_continue(buffer, len);
         } else {
             self.buffer.replace(buffer);
-            self.run_next_command(kernel::errorcode::into_statuscode(r), 0, 0);
+            self.run_next_command(1, kernel::errorcode::into_statuscode(r), 0);
         }
     }
 
     fn screen_is_ready(&self) {
-        self.run_next_command(kernel::errorcode::into_statuscode(Ok(())), 0, 0);
+    kernel::debug!("ready");
+        self.run_next_command(0, kernel::errorcode::into_statuscode(Ok(())), 0);
     }
 }
 
@@ -551,6 +561,7 @@ impl<'a> SyscallDriver for Screen<'a> {
         data2: usize,
         process_id: ProcessId,
     ) -> CommandReturn {
+    kernel::debug!("syscall");
         match command_num {
             0 =>
             // This driver exists.
