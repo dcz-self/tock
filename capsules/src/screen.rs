@@ -527,23 +527,24 @@ impl<'a> Screen<'a> {
 
 impl<'a> hil::screen::ScreenClient for Screen<'a> {
     fn command_complete(&self, r: Result<(), ErrorCode>) {
-        self.run_next_command(2, kernel::errorcode::into_statuscode(r), 0);
+        self.run_next_command(kernel::errorcode::into_statuscode(r), 0, 0);
     }
 
     fn write_complete(&self, buffer: &'static mut [u8], r: Result<(), ErrorCode>) {
+        kernel::debug!("complete caught");
         let len = self.fill_next_buffer_for_write(buffer);
 
         if r == Ok(()) && len > 0 {
             let _ = self.screen.write_continue(buffer, len);
         } else {
+kernel::debug!("complete done");
             self.buffer.replace(buffer);
-            self.run_next_command(1, kernel::errorcode::into_statuscode(r), 0);
+            self.run_next_command(kernel::errorcode::into_statuscode(r), 0, 0);
         }
     }
 
     fn screen_is_ready(&self) {
-    kernel::debug!("ready");
-        self.run_next_command(0, kernel::errorcode::into_statuscode(Ok(())), 0);
+        self.run_next_command(kernel::errorcode::into_statuscode(Ok(())), 0, 0);
     }
 }
 
@@ -561,7 +562,6 @@ impl<'a> SyscallDriver for Screen<'a> {
         data2: usize,
         process_id: ProcessId,
     ) -> CommandReturn {
-    kernel::debug!("syscall");
         match command_num {
             0 =>
             // This driver exists.
@@ -600,7 +600,10 @@ impl<'a> SyscallDriver for Screen<'a> {
             ),
 
             // Get Resolution
-            23 => self.enqueue_command(ScreenCommand::GetResolution, process_id),
+            23 => {
+                let (width, height) = self.screen.get_resolution();
+                CommandReturn::success_u32_u32(width as u32, height as u32)
+            },
             // Set Resolution
             24 => self.enqueue_command(
                 ScreenCommand::SetResolution {
@@ -611,7 +614,9 @@ impl<'a> SyscallDriver for Screen<'a> {
             ),
 
             // Get Color Depth
-            25 => self.enqueue_command(ScreenCommand::GetPixelFormat, process_id),
+            25 =>  CommandReturn::success_u32(
+                self.screen.get_pixel_format() as u32
+            ),
             // Set Color Depth
             26 => {
                 if let Some(pixel_format) = screen_pixel_format_from(data1) {

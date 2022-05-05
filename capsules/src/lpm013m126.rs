@@ -10,6 +10,7 @@
 //! ```
 
 use core::cell::Cell;
+use core::cmp;
 use kernel::debug;
 use kernel::dynamic_deferred_call::{
     DeferredCallHandle, DynamicDeferredCall, DynamicDeferredCallClient,
@@ -63,7 +64,7 @@ impl<'a> FrameBuffer<'a> {
 
     /// Copy pixels from the buffer. The buffer may be shorter than frame.
     fn blit(&mut self, buffer: &[u8], frame: &WriteFrame) {
-        if frame.column != 0 {
+        if frame.column % 8 != 0 {
             // Can't be arsed to bit shift pixels…
             panic!("Horizontal offset not supported");
         }
@@ -72,8 +73,9 @@ impl<'a> FrameBuffer<'a> {
         let sources = buffer.chunks(frame.width as usize / 8);
         for (i, source) in rows.zip(sources) {
             let row = self.get_row_mut(i);
-            debug!("rowl {} soul {}", row.len(), source.len());
-            row[..(source.len())].copy_from_slice(source);
+            row[(frame.column as usize / 8)..]
+                [..(source.len())]
+                .copy_from_slice(source);
         }
     }
 
@@ -207,7 +209,7 @@ pub struct Lpm013m126<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> {
     frame_buffer: OptionalCell<FrameBuffer<'static>>,
 
     client: OptionalCell<&'static dyn ScreenClient>,
-    /// Buffer for incoming pixel data.
+    /// Buffer for incoming pixel data, coming from the client.
     /// It's not submitted directly anywhere.
     buffer: TakeCell<'static, [u8]>,
 
@@ -343,6 +345,7 @@ where
     }
 
     fn call_write_complete(&self, ret: Result<(), ErrorCode>) -> Option<bool> {
+        debug!("write complete");
         if let Some((handle, None)) = self.write_complete_callback.extract() {
             self.write_complete_callback.set((handle, Some(ret)));
             self.deferred_caller.set(handle)
@@ -382,9 +385,10 @@ where
         width: usize,
         height: usize,
     ) -> Result<(), ErrorCode> {
+        kernel::debug!("{} {} {} {}", x, y, width, height);
         let rows = 176;
         let columns = 176;
-        if y >= rows || y + height >= rows || x >= columns || x + width >= columns {
+        if y >= rows || y + height > rows || x >= columns || x + width > columns {
             return Err(ErrorCode::INVAL);
         }
 
@@ -428,6 +432,7 @@ where
     }
 
     fn write(&self, buffer: &'static mut [u8], len: usize) -> Result<(), ErrorCode> {
+        debug!("write");
         let ret = match self.state.get() {
             State::Uninitialized | State::Off => Err(ErrorCode::OFF),
             State::InitializingPixelMemory | State::InitializingRest => Err(ErrorCode::BUSY),
@@ -435,7 +440,7 @@ where
                 self.frame_buffer
                     .take()
                     .map_or(Err(ErrorCode::NOMEM), |mut frame_buffer| {
-                        frame_buffer.blit(&buffer[..len], &frame);
+                        frame_buffer.blit(&buffer[..cmp::min(buffer.len(), len)], &frame);
                         let send_buf = FrameBuffer::with_raw_rows(
                             frame_buffer,
                             frame.row,
@@ -461,7 +466,7 @@ where
         };
 
         self.buffer.replace(buffer);
-
+/*
         match self.state.get() {
             State::Writing(..) => {}
             _ => match self.call_write_complete(ret) {
@@ -474,7 +479,7 @@ where
                     self.state.set(State::Bug);
                 }
             },
-        };
+        };*/
 
         ret
     }
@@ -600,7 +605,7 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> SpiMasterClient for Lpm013m12
         write_buffer: SubmitBuffer<'static>,
         _read_buffer: Option<&'static mut [u8]>,
         _len: usize,
-        _status: Result<(), ErrorCode>,
+        status: Result<(), ErrorCode>,
     ) {
         self.frame_buffer.replace(FrameBuffer::new(write_buffer));
         self.state.set(match self.state.get() {
@@ -625,15 +630,14 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> SpiMasterClient for Lpm013m12
                 State::Bug
             }
         });
-        /*
-        Useless at the moment, a write to the frame buffer was already required,
-        and that calls write_complete uncondtionally.
-                self.client.map(|client| {
-                    self.buffer
-                        .take()
-                        .map(|buf| client.write_complete(buf, status))
-                });
-        */
+
+        // Device frame buffer is now up to date, return pixel buffer to client.
+        self.client.map(|client| {
+            debug!("write done");
+            self.buffer
+                .take()
+                .map(|buf| client.write_complete(buf, status))
+        });
     }
 }
 
