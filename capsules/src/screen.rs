@@ -190,7 +190,6 @@ impl<'a> Screen<'a> {
     }
 
     fn call_screen(&self, command: ScreenCommand, process_id: ProcessId) -> Result<(), ErrorCode> {
-    kernel::debug!("callscreen {:?}", command);
         match command {
             ScreenCommand::SetBrightness(brighness) => self.screen.set_brightness(brighness),
             ScreenCommand::SetPower(enabled) => self.screen.set_power(enabled),
@@ -531,13 +530,11 @@ impl<'a> hil::screen::ScreenClient for Screen<'a> {
     }
 
     fn write_complete(&self, buffer: &'static mut [u8], r: Result<(), ErrorCode>) {
-        kernel::debug!("complete caught");
         let len = self.fill_next_buffer_for_write(buffer);
 
         if r == Ok(()) && len > 0 {
             let _ = self.screen.write_continue(buffer, len);
         } else {
-kernel::debug!("complete done");
             self.buffer.replace(buffer);
             self.run_next_command(kernel::errorcode::into_statuscode(r), 0, 0);
         }
