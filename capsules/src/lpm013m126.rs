@@ -459,7 +459,7 @@ where
         };
 
         self.buffer.replace(buffer);
-        /*
+        
         match self.state.get() {
             State::Writing(..) => {}
             _ => match self.call_write_complete(ret) {
@@ -472,7 +472,7 @@ where
                     self.state.set(State::Bug);
                 }
             },
-        };*/
+        };
 
         ret
     }
