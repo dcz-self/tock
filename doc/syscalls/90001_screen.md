@@ -8,6 +8,14 @@ driver number: 0x90001
 
 The screen driver allows the process to write data to a framebuffer of a screen.
 
+This syscall driver is designed for single-client usage, for the sake of simplicity, and because a single client covers a significant portion of display use cases.
+
+This results in a technical limitation where, while several clients may use this interface simultaneously, each may independently modify parameters defining the usage of the display, like resolution, or power. Those changes will not be broadcast to every client, requiring external synchronization.
+
+This syscall interface does not expose the current power state of the display, so each usage should start by calling the "Set power" syscall.
+
+All commands except "Does the driver exist?" and "Set power" may return failures when power is not enabled.
+
 ## Command
 
   * ### Command number: `0`

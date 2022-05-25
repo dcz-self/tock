@@ -155,7 +155,7 @@ pub trait Screen {
     /// This function is synchronous as the driver should know this value without
     /// requesting it from the screen.
     ///
-    /// note that width and height may change due to rotation
+    /// Note that width and height may change due to rotation.
     fn get_resolution(&self) -> (usize, usize);
 
     /// Returns the current pixel format
