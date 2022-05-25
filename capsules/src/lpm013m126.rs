@@ -7,7 +7,6 @@
 //! This driver supports monochrome mode only.
 //!
 //! Written by Dorota <gihu.dcz@porcupinefactory.org>
-//! ```
 
 use core::cell::Cell;
 use core::cmp;
@@ -73,9 +72,7 @@ impl<'a> FrameBuffer<'a> {
         let sources = buffer.chunks(frame.width as usize / 8);
         for (i, source) in rows.zip(sources) {
             let row = self.get_row_mut(i);
-            row[(frame.column as usize / 8)..]
-                [..(source.len())]
-                .copy_from_slice(source);
+            row[(frame.column as usize / 8)..][..(source.len())].copy_from_slice(source);
         }
     }
 
@@ -142,17 +139,10 @@ fn schedule_deferred(
     callback: &OptionalCell<DeferredCallHandle>,
     name: &str,
 ) -> Result<(), ()> {
-    match callback
-        .extract()
-        .and_then(|handle| caller.set(handle))
-    {
+    match callback.extract().and_then(|handle| caller.set(handle)) {
         Some(true) => Ok(()),
         other => {
-            debug!(
-                "LPM013M126 can't call {} (returned {:?})",
-                name,
-                other,
-            );
+            debug!("LPM013M126 can't call {} (returned {:?})", name, other,);
             Err(())
         }
     }
@@ -188,6 +178,11 @@ enum State {
     Bug,
 }
 
+#[derive(Debug)]
+pub enum InitError {
+    BufferTooSmall,
+}
+
 pub struct Lpm013m126<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> {
     spi: &'a S,
     extcomin: &'a P,
@@ -221,7 +216,6 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> Lpm013m126<'a, A, P, S>
 where
     Self: 'static,
 {
-    /// Caution: passing `frame_buffer` that's too small will panic.
     pub fn new(
         spi: &'a S,
         extcomin: &'a P,
@@ -229,23 +223,27 @@ where
         alarm: &'a A,
         deferred_caller: &'a DynamicDeferredCall,
         frame_buffer: &'static mut [u8],
-    ) -> Self {
-        Self {
-            spi,
-            alarm: alarm,
-            disp,
-            extcomin,
-            deferred_caller,
-            ready_callback: OptionalCell::empty(),
-            command_complete_callback: OptionalCell::empty(),
-            write_complete_callback: OptionalCell::empty(),
-            frame_buffer: OptionalCell::new(FrameBuffer::new(frame_buffer)),
-            buffer: TakeCell::empty(),
-            client: OptionalCell::empty(),
-            state: Cell::new(State::Uninitialized),
+    ) -> Result<Self, InitError> {
+        if frame_buffer.len() < BUFFER_SIZE {
+            Err(InitError::BufferTooSmall)
+        } else {
+            Ok(Self {
+                spi,
+                alarm,
+                disp,
+                extcomin,
+                deferred_caller,
+                ready_callback: OptionalCell::empty(),
+                command_complete_callback: OptionalCell::empty(),
+                write_complete_callback: OptionalCell::empty(),
+                frame_buffer: OptionalCell::new(FrameBuffer::new(frame_buffer)),
+                buffer: TakeCell::empty(),
+                client: OptionalCell::empty(),
+                state: Cell::new(State::Uninitialized),
+            })
         }
     }
-    
+
     /// Set up internal data structures.
     /// Does not touch the hardware.
     /// Idempotent.
@@ -285,10 +283,10 @@ where
                 // Ideally they should unregister RAII style, but I'm not sure how.
                 // Perhaps in new().
                 // The deferred caller doesn't support unregistering anyway.
-                
+
                 self.state.set(State::Off);
                 Ok(())
-            },
+            }
             _ => Err(ErrorCode::ALREADY),
         }
     }
@@ -307,7 +305,7 @@ where
                 self.extcomin.clear();
                 self.disp.make_output();
                 self.disp.clear();
- 
+
                 match self.frame_buffer.take() {
                     None => Err(ErrorCode::NOMEM),
                     Some(mut frame_buffer) => {
@@ -345,7 +343,6 @@ where
     }
 
     fn call_write_complete(&self, ret: Result<(), ErrorCode>) -> Option<bool> {
-        debug!("write complete");
         if let Some((handle, None)) = self.write_complete_callback.extract() {
             self.write_complete_callback.set((handle, Some(ret)));
             self.deferred_caller.set(handle)
@@ -385,7 +382,6 @@ where
         width: usize,
         height: usize,
     ) -> Result<(), ErrorCode> {
-        kernel::debug!("{} {} {} {}", x, y, width, height);
         let rows = 176;
         let columns = 176;
         if y >= rows || y + height > rows || x >= columns || x + width > columns {
@@ -419,9 +415,9 @@ where
             &self.command_complete_callback,
             "command_complete",
         );
-        
+
         if let Err(()) = scheduled {
-                new_state = Some(State::Bug);
+            new_state = Some(State::Bug);
         };
 
         if let Some(new_state) = new_state {
@@ -432,7 +428,6 @@ where
     }
 
     fn write(&self, buffer: &'static mut [u8], len: usize) -> Result<(), ErrorCode> {
-        debug!("write");
         let ret = match self.state.get() {
             State::Uninitialized | State::Off => Err(ErrorCode::OFF),
             State::InitializingPixelMemory | State::InitializingRest => Err(ErrorCode::BUSY),
@@ -446,9 +441,7 @@ where
                             frame.row,
                             frame.row + frame.height,
                         );
-                        //send_buf[0] = 67;
-                        //send_buf[2] = 0;
-                        //debug!("{}, {:?}", send_buf.len(), &send_buf[47..73]);
+
                         let sent = self.spi.read_write_bytes(send_buf, None, send_buf.len());
                         let (ret, new_state) = match sent {
                             Ok(()) => (Ok(()), State::Writing(frame)),
@@ -466,7 +459,7 @@ where
         };
 
         self.buffer.replace(buffer);
-/*
+        /*
         match self.state.get() {
             State::Writing(..) => {}
             _ => match self.call_write_complete(ret) {
@@ -513,12 +506,8 @@ where
         // If the device is in the desired state by now,
         // then a callback needs to be sent manually.
         if let Err(ErrorCode::ALREADY) = ret {
-            let scheduled = schedule_deferred(
-                self.deferred_caller,
-                &self.ready_callback,
-                "ready",
-            );
-            
+            let scheduled = schedule_deferred(self.deferred_caller, &self.ready_callback, "ready");
+
             if let Err(()) = scheduled {
                 self.state.set(State::Bug);
                 Err(ErrorCode::FAIL)
@@ -529,7 +518,7 @@ where
             ret
         }
     }
-    
+
     fn set_brightness(&self, _brightness: usize) -> Result<(), ErrorCode> {
         // TODO: add LED PWM
         Ok(())
@@ -633,7 +622,6 @@ impl<'a, A: Alarm<'a>, P: Pin, S: SpiMasterDevice> SpiMasterClient for Lpm013m12
 
         // Device frame buffer is now up to date, return pixel buffer to client.
         self.client.map(|client| {
-            debug!("write done");
             self.buffer
                 .take()
                 .map(|buf| client.write_complete(buf, status))

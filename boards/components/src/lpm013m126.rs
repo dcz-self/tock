@@ -17,6 +17,7 @@
 //!         disp_pin,
 //!         extcomin_pin,
 //!         alarm_mux,
+//!         dynamic_deferred_caller,
 //!     )
 //!     .finalize(
 //!         components::lpm013m126_component_helper!(
@@ -187,14 +188,17 @@ where
         let lpm013m126_alarm = alarm.initialize(VirtualMuxAlarm::new(self.alarm_mux));
         lpm013m126_alarm.setup();
 
-        let lpm013m126 = lpm013m126.initialize(Lpm013m126::new(
-            spi_device,
-            self.extcomin,
-            self.disp,
-            lpm013m126_alarm,
-            self.deferred_caller,
-            buffer,
-        ));
+        let lpm013m126 = lpm013m126.initialize(
+            Lpm013m126::new(
+                spi_device,
+                self.extcomin,
+                self.disp,
+                lpm013m126_alarm,
+                self.deferred_caller,
+                buffer,
+            )
+            .unwrap(),
+        );
         spi_device.set_client(lpm013m126);
         lpm013m126_alarm.set_alarm_client(lpm013m126);
         lpm013m126.setup().unwrap();
