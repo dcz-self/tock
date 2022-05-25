@@ -53,26 +53,18 @@ The screen driver allows the process to write data to a framebuffer of a screen.
 
     **Returns**: Ok(()) if the command was successful, BUSY if another command is in progress.
 
-  * ### Command number: `4`
+  * ### Command number: `6`
 
-    **Description**: Turn on invert colors mode
+    **Description**: Control invert colors mode.
+    Color inversion will affect all pixels already submitted, and submitted in the future.
+    It may get reset when in case of switching pixel formats.
 
-    **Argument 1**: unused
+    **Argument 1**: 0 if off, nonzero if on.
 
     **Argument 2**: unused
 
     **Returns**: Ok(()) if the command was successful, BUSY if another command is in progress.
   
-  * ### Command number: `5`
-
-    **Description**: Turn off invert colors mode
-
-    **Argument 1**: unused
-
-    **Argument 2**: unused
-
-    **Returns**: Ok(()) if the command was successful, BUSY if another command is in progress.
-
   * ### Command number: `11` 
 
     **Description**: Get the number of supported resolutions (Setup API)
