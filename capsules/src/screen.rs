@@ -53,7 +53,7 @@ fn screen_pixel_format_from(screen_pixel_format: usize) -> Option<ScreenPixelFor
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq)]
 enum ScreenCommand {
     Nop,
     SetBrightness(usize),
@@ -159,16 +159,8 @@ impl<'a> Screen<'a> {
                         self.current_process.clear();
                     }
                     CommandReturn::from(r)
-                };
-
-                if self.current_process.is_some() {
-                    // I'm not seeing a point in queueing...
-                    // Typically commands need an accurate return value,
-                    // so need immediate access (TODO),
-                    // and those with callbacks can simply return BUSY.
-                    CommandReturn::failure(ErrorCode::BUSY)
                 } else {
-                    call()
+                    r
                 }
             }
         }
@@ -540,7 +532,6 @@ impl<'a> SyscallDriver for Screen<'a> {
             // Get pixel format
             25 => CommandReturn::success_u32(self.screen.get_pixel_format() as u32),
             // Set pixel format
-            ),
             26 => {
                 if let Some(pixel_format) = screen_pixel_format_from(data1) {
                     self.enqueue_command(ScreenCommand::SetPixelFormat(pixel_format), process_id)
