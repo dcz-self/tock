@@ -1,0 +1,10 @@
+image: fedora:36
+ 
+build_sma_q3:
+    script:
+        - dnf install -y make gcc
+        - curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain nightly-2021-12-04 -y
+        - source $HOME/.cargo/env
+        - rustup component add llvm-tools-preview rust-src
+        - rustup target add thumbv7em-none-eabi
+        - cd boards/nordic/sma_q3 && make V=1
