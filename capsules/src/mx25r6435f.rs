@@ -81,12 +81,6 @@ enum Opcodes {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-enum Operation {
-    Erase,
-    Write { page_index: u32 },
-}
-
-#[derive(Clone, Copy, PartialEq)]
 enum State {
     Idle,
 
@@ -96,14 +90,9 @@ enum State {
 
     EraseSectorWriteEnable {
         sector_index: u32,
-        operation: Operation,
     },
-    EraseSectorErase {
-        operation: Operation,
-    },
-    EraseSectorCheckDone {
-        operation: Operation,
-    },
+    EraseSectorErase,
+    EraseSectorCheckDone,
     EraseSectorDone,
 
     WriteSectorWriteEnable {
@@ -235,7 +224,6 @@ impl<
         self.configure_spi()?;
         self.state.set(State::EraseSectorWriteEnable {
             sector_index,
-            operation: Operation::Erase,
         });
         self.enable_write()
     }
@@ -347,7 +335,7 @@ impl<
                 });
             }
             State::ReadSector {
-                page_index,
+                page_index: _
             } => {
                 self.client_sector.take().map(|sector| {
                     read_buffer.map(move |read_buffer| {
@@ -369,9 +357,8 @@ impl<
             }
             State::EraseSectorWriteEnable {
                 sector_index,
-                operation,
             } => {
-                self.state.set(State::EraseSectorErase { operation });
+                self.state.set(State::EraseSectorErase);
                 let address = sector_index * SECTOR_SIZE as u32;
                 write_buffer[0] = Opcodes::SE as u8;
                 write_buffer[1] = (address >> 16) as u8;
@@ -381,15 +368,15 @@ impl<
                 // TODO verify SPI return value
                 let _ = self.spi.read_write_bytes(write_buffer, None, 4);
             }
-            State::EraseSectorErase { operation } => {
-                self.state.set(State::EraseSectorCheckDone { operation });
+            State::EraseSectorErase => {
+                self.state.set(State::EraseSectorCheckDone);
                 self.txbuffer.replace(write_buffer);
                 // Datasheet says erase takes 58 ms on average. So we wait that
                 // long.
                 let delay = self.alarm.ticks_from_ms(58);
                 self.alarm.set_alarm(self.alarm.now(), delay);
             }
-            State::EraseSectorCheckDone { operation } => {
+            State::EraseSectorCheckDone => {
                 read_buffer.map(move |read_buffer| {
                     let status = read_buffer[1];
 
