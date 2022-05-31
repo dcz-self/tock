@@ -1,6 +1,9 @@
 image: fedora:36
  
 build_sma_q3:
+    artifacts:
+        paths:
+            - target/thumbv7em-none-eabi/release/sma_q3.bin
     script:
         - dnf install -y make gcc
         - curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain nightly-2021-12-04 -y
