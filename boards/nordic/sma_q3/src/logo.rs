@@ -17,7 +17,7 @@ impl<S: 'static + kernel::hil::time::Alarm<'static>, P: 'static + kernel::hil::g
             [0; 3344],
         ) };
         b.copy_from_slice(include_bytes!("./logo.bin"));
-        dbg!(self.0.write(&mut b[..], 3344));
+        dbg!(self.0.write(&mut b[..], 3344).unwrap());
     }
     fn command_complete(&self, res: Result<(), ErrorCode>) {
         debug!("Command complete");
