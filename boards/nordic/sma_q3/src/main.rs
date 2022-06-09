@@ -622,58 +622,6 @@ pub unsafe fn main() {
     periodic.arm();
     bmp280.begin_reset().unwrap();
     
-    {
-        // React to button presses
-        use kernel::hil::gpio;
-        use kernel::hil;
-        use hil::time::ConvertTicks;
-        use gpio::{Interrupt, Configure, Input};
-
-        struct ButtonOverride<'a, A: hil::time::Alarm<'a>> {
-            pin: &'a nrf52840::gpio::GPIOPin<'a>,
-            alarm: &'a A,
-        }
-        impl<'a, A: hil::time::Alarm<'a>> gpio::Client for ButtonOverride<'a, A> {
-            fn fired(&self) {
-                debug!("button now {}", self.pin.read());
-                if self.pin.read() == false {
-                // logic 0, so pressed. TODO: how does this relate to "active low"?
-                    let delay = self.alarm.ticks_from_ms(2000);
-                    self.alarm.set_alarm(self.alarm.now(), delay);
-                } else {
-                    self.alarm.disarm().unwrap();
-                }
-            }
-        }
-        impl<'a, A: hil::time::Alarm<'a>> hil::time::AlarmClient for ButtonOverride<'a, A> {
-            fn alarm(&self) {
-                debug!("HELD!");
-            }
-        }
-        
-        let button_timeout = static_init!(
-            capsules::virtual_alarm::VirtualMuxAlarm<'static, nrf52840::rtc::Rtc>,
-            capsules::virtual_alarm::VirtualMuxAlarm::new(mux_alarm)
-        );
-        button_timeout.setup();
-        
-        let button = &nrf52840_peripherals.gpio_port[BUTTON_PIN];
-
-        let handler = static_init!(
-            ButtonOverride<
-                'static,
-                VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>,
-            >,
-            ButtonOverride { pin: button, alarm: button_timeout},
-        );
-        
-        button.make_input();
-        button.set_floating_state(gpio::FloatingState::PullUp);
-        button.set_client(handler);
-        button_timeout.set_alarm_client(handler);
-        button.enable_interrupts(gpio::InterruptEdge::EitherEdge);
-    }
-    
     let platform = Platform {
         temperature,
         button,
@@ -699,6 +647,135 @@ pub unsafe fn main() {
         systick: cortexm4::systick::SysTick::new_with_calibration(64000000),
     };
 
+    
+    fn load_processes(
+        board_kernel: &'static kernel::Kernel,
+        chip: &'static nrf52840::chip::NRF52<'static, Nrf52840DefaultPeripherals<'static>>,
+    ) {
+        let process_management_capability =
+        create_capability!(capabilities::ProcessManagementCapability);
+        unsafe {
+            kernel::process::load_processes(
+                board_kernel,
+                chip,
+                core::slice::from_raw_parts(
+                    &_sapps as *const u8,
+                    &_eapps as *const u8 as usize - &_sapps as *const u8 as usize,
+                ),
+                core::slice::from_raw_parts_mut(
+                    &mut _sappmem as *mut u8,
+                    &_eappmem as *const u8 as usize - &_sappmem as *const u8 as usize,
+                ),
+                &mut PROCESSES,
+                &FAULT_RESPONSE,
+                &process_management_capability,
+            )
+            .unwrap_or_else(|err| {
+                debug!("Error loading processes!");
+                debug!("{:?}", err);
+            });
+        }
+    }
+    
+    {
+        // React to long button presses with killing all running applications.
+        // TODO: long-press again to start all default applications
+        // TODO: after killing, put peripherals into low-power modes
+        // TODO: initialize after apps are started?
+        use core::cell::Cell;
+        use kernel::hil::gpio;
+        use kernel::hil;
+        use hil::time::ConvertTicks;
+        use gpio::{Interrupt, Configure, Input};
+
+        #[derive(Clone, Copy)]
+        enum BoardState {
+            // no apps running
+            Off,
+            // apps running
+            On,
+        }
+        
+        struct ButtonOff<'a, A: hil::time::Alarm<'a>> {
+            pin: &'a nrf52840::gpio::GPIOPin<'a>,
+            alarm: &'a A,
+            state: Cell<BoardState>,
+            board_kernel: &'static kernel::Kernel,
+            chip: &'static nrf52840::chip::NRF52<'static, Nrf52840DefaultPeripherals<'static>>,
+        }
+        
+        impl<'a, A: hil::time::Alarm<'a>> gpio::Client for ButtonOff<'a, A> {
+            fn fired(&self) {
+                debug!("button now {}", self.pin.read());
+                if self.pin.read() == false {
+                // logic 0, so pressed. TODO: how does this relate to "active low"?
+                    let delay = self.alarm.ticks_from_ms(2000);
+                    self.alarm.set_alarm(self.alarm.now(), delay);
+                } else {
+                    self.alarm.disarm().unwrap();
+                }
+            }
+        }
+        
+        impl<'a, A: hil::time::Alarm<'a>> hil::time::AlarmClient for ButtonOff<'a, A> {
+            fn alarm(&self) {
+                if let BoardState::On = self.state.get() {
+                    debug!("Stopping all processes!");
+                    use kernel::process;
+                    // FIXME: this unsafe is really unsafe: might interfere with the round-robin scheduler... or may it not?
+                    unsafe {
+                    for process in PROCESSES {
+                        if let Some(process) = process {
+                            match process.get_state() {
+                                process::State::Faulted
+                                | process::State::Terminated
+                                | process::State::Unstarted => {
+                                // no need to inform the user, the process is dead anyway
+                                },
+                                _ => debug!("terminating process {}", process.get_process_name()),
+                            };
+                            process.terminate(None);
+                        }
+                    }
+                    }
+                    self.state.set(BoardState::Off);
+                } else {
+                    self.state.set(BoardState::On);
+                    load_processes(self.board_kernel, self.chip);
+                }
+            }
+        }
+        
+        let button_timeout = static_init!(
+            capsules::virtual_alarm::VirtualMuxAlarm<'static, nrf52840::rtc::Rtc>,
+            capsules::virtual_alarm::VirtualMuxAlarm::new(mux_alarm)
+        );
+        button_timeout.setup();
+        
+        let button = &nrf52840_peripherals.gpio_port[BUTTON_PIN];
+
+        let handler = static_init!(
+            ButtonOff<
+                'static,
+                VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>,
+            >,
+            ButtonOff {
+                pin: button,
+                alarm: button_timeout,
+                state: Cell::new(BoardState::On),
+                board_kernel,
+                chip,
+            },
+        );
+        
+        button.make_input();
+        button.set_floating_state(gpio::FloatingState::PullUp);
+        button.set_client(handler);
+        button_timeout.set_alarm_client(handler);
+        button.enable_interrupts(gpio::InterruptEdge::EitherEdge);
+    }
+    
+    
     let _ = platform.pconsole.start();
     debug!("Initialization complete. Entering main loop\r");
     debug!("{}", &nrf52840::ficr::FICR_INSTANCE);
