@@ -625,20 +625,26 @@ pub unsafe fn main() {
     {
         // React to button presses
         use kernel::hil::gpio;
-        use gpio::{Interrupt, Configure};
+        use gpio::{Interrupt, Configure, Input};
 
-        struct ButtonOverride;
-        impl gpio::Client for ButtonOverride {
+        struct ButtonOverride<'a>(&'a nrf52840::gpio::GPIOPin<'a>);
+        impl gpio::Client for ButtonOverride<'_> {
             fn fired(&self) {
-                debug!("button");
+                debug!("button now {}", self.0.read());
             }
         }
+        
         let button = &nrf52840_peripherals.gpio_port[BUTTON_PIN];
 
+        let handler = static_init!(
+            ButtonOverride<'static>,
+            ButtonOverride(button),
+        );
+        
         button.make_input();
         button.set_floating_state(gpio::FloatingState::PullUp);
-        button.set_client(&ButtonOverride);
-        button.enable_interrupts(gpio::InterruptEdge::FallingEdge);
+        button.set_client(handler);
+        button.enable_interrupts(gpio::InterruptEdge::EitherEdge);
     }
     
     let platform = Platform {
