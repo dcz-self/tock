@@ -473,17 +473,21 @@ pub unsafe fn main() {
             nrf52840::pinmux::Pinmux::new(Pin::P0_26 as u32),
         );
         
+        let disp_pin = &nrf52840_peripherals.gpio_port[Pin::P0_07];
+        
         let c: components::lpm013m126::Lpm013m126Component<
             nrf52840::rtc::Rtc<'static>,
             nrf52840::gpio::GPIOPin<'_>,
             nrf52840::spi::SPIM,
         >
         = components::lpm013m126::Lpm013m126Component::new(
-            &nrf52840_peripherals.gpio_port[Pin::P0_07],
+            disp_pin,
             &nrf52840_peripherals.gpio_port[Pin::P0_06],
             mux_alarm,
             dynamic_deferred_caller,
         );
+        
+        let cs_pin = &nrf52840_peripherals.gpio_port[Pin::P0_05];
         
         let display: &'static capsules::lpm013m126::Lpm013m126<
             'static,
@@ -498,7 +502,7 @@ pub unsafe fn main() {
                     nrf52840::gpio::GPIOPin,
                     nrf52840::spi::SPIM,
                     mux_spi, 
-                    &nrf52840_peripherals.gpio_port[Pin::P0_05],
+                    cs_pin,
                 ),
             );
         use kernel::hil::screen::Screen;
@@ -517,7 +521,7 @@ pub unsafe fn main() {
         screen
     };
     
-    let gnss = {
+    let (gnss, gnss_pin) = {
         use kernel::hil::uart;
         use kernel::hil::uart::Configure;
         use kernel::hil::uart::Receive;
@@ -559,7 +563,7 @@ pub unsafe fn main() {
         let pin = &nrf52840_peripherals.gpio_port[Pin::P0_29];
         pin.make_output();
         pin.set();
-        gnss
+        (gnss, pin)
     };
     
     let rng = components::rng::RngComponent::new(
@@ -681,12 +685,12 @@ pub unsafe fn main() {
         // React to long button presses with killing all running applications.
         // long-press again to start all default applications
         // TODO: after killing, put peripherals into low-power modes
-        // TODO: initialize after apps are started?
+        // TODO: initialize this driver after apps are first started?
         use core::cell::Cell;
         use kernel::hil::gpio;
         use kernel::hil;
         use hil::time::ConvertTicks;
-        use gpio::{Interrupt, Configure, Input};
+        use gpio::{Interrupt, Configure, Input, Output};
 
         #[derive(Clone, Copy)]
         enum BoardState {
@@ -702,8 +706,20 @@ pub unsafe fn main() {
             state: Cell<BoardState>,
             board_kernel: &'static kernel::Kernel,
             chip: &'static nrf52840::chip::NRF52<'static, Nrf52840DefaultPeripherals<'static>>,
+            gnss_power: &'a nrf52840::gpio::GPIOPin<'a>,
         }
         
+        impl<'a, A: hil::time::Alarm<'a>> ButtonOff<'a, A> {
+            fn peripherals_off(&self) {
+                self.gnss_power.clear();
+            }
+            /// Some peripherals won't be enabled when acquired,
+            /// so enable them unconditionally
+            fn peripherals_on(&self) {
+                self.gnss_power.set();
+            }
+        }
+
         impl<'a, A: hil::time::Alarm<'a>> gpio::Client for ButtonOff<'a, A> {
             fn fired(&self) {
                 debug!("button now {}", self.pin.read());
@@ -738,9 +754,11 @@ pub unsafe fn main() {
                         }
                     }
                     }
+                    self.peripherals_off();
                     self.state.set(BoardState::Off);
                 } else {
                     self.state.set(BoardState::On);
+                    self.peripherals_on();
                     load_processes(self.board_kernel, self.chip);
                 }
             }
@@ -765,6 +783,7 @@ pub unsafe fn main() {
                 state: Cell::new(BoardState::On),
                 board_kernel,
                 chip,
+                gnss_power: gnss_pin,
             },
         );
         
