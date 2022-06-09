@@ -679,7 +679,7 @@ pub unsafe fn main() {
     
     {
         // React to long button presses with killing all running applications.
-        // TODO: long-press again to start all default applications
+        // long-press again to start all default applications
         // TODO: after killing, put peripherals into low-power modes
         // TODO: initialize after apps are started?
         use core::cell::Cell;
