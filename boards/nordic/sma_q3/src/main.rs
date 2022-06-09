@@ -625,25 +625,52 @@ pub unsafe fn main() {
     {
         // React to button presses
         use kernel::hil::gpio;
+        use kernel::hil;
+        use hil::time::ConvertTicks;
         use gpio::{Interrupt, Configure, Input};
 
-        struct ButtonOverride<'a>(&'a nrf52840::gpio::GPIOPin<'a>);
-        impl gpio::Client for ButtonOverride<'_> {
+        struct ButtonOverride<'a, A: hil::time::Alarm<'a>> {
+            pin: &'a nrf52840::gpio::GPIOPin<'a>,
+            alarm: &'a A,
+        }
+        impl<'a, A: hil::time::Alarm<'a>> gpio::Client for ButtonOverride<'a, A> {
             fn fired(&self) {
-                debug!("button now {}", self.0.read());
+                debug!("button now {}", self.pin.read());
+                if self.pin.read() == false {
+                // logic 0, so pressed. TODO: how does this relate to "active low"?
+                    let delay = self.alarm.ticks_from_ms(2000);
+                    self.alarm.set_alarm(self.alarm.now(), delay);
+                } else {
+                    self.alarm.disarm().unwrap();
+                }
             }
         }
+        impl<'a, A: hil::time::Alarm<'a>> hil::time::AlarmClient for ButtonOverride<'a, A> {
+            fn alarm(&self) {
+                debug!("HELD!");
+            }
+        }
+        
+        let button_timeout = static_init!(
+            capsules::virtual_alarm::VirtualMuxAlarm<'static, nrf52840::rtc::Rtc>,
+            capsules::virtual_alarm::VirtualMuxAlarm::new(mux_alarm)
+        );
+        button_timeout.setup();
         
         let button = &nrf52840_peripherals.gpio_port[BUTTON_PIN];
 
         let handler = static_init!(
-            ButtonOverride<'static>,
-            ButtonOverride(button),
+            ButtonOverride<
+                'static,
+                VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>,
+            >,
+            ButtonOverride { pin: button, alarm: button_timeout},
         );
         
         button.make_input();
         button.set_floating_state(gpio::FloatingState::PullUp);
         button.set_client(handler);
+        button_timeout.set_alarm_client(handler);
         button.enable_interrupts(gpio::InterruptEdge::EitherEdge);
     }
     
