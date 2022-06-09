@@ -450,9 +450,16 @@ pub unsafe fn main() {
             4096,
         ));
 
-    let screen = {
-        use capsules::virtual_spi::VirtualSpiMasterDevice;
-
+    use capsules::virtual_spi::VirtualSpiMasterDevice;
+        
+    type Screen = capsules::lpm013m126::Lpm013m126<
+        'static,
+        VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>,
+        nrf52840::gpio::GPIOPin<'static>,
+        VirtualSpiMasterDevice<'static, nrf52840::spi::SPIM>
+    >;
+        
+    let (screen, screen_device) = {
         let mux_spi
             = components::spi::SpiMuxComponent::new(
                 &base_peripherals.spim2,
@@ -477,7 +484,7 @@ pub unsafe fn main() {
         
         let c: components::lpm013m126::Lpm013m126Component<
             nrf52840::rtc::Rtc<'static>,
-            nrf52840::gpio::GPIOPin<'_>,
+            nrf52840::gpio::GPIOPin<'static>,
             nrf52840::spi::SPIM,
         >
         = components::lpm013m126::Lpm013m126Component::new(
@@ -489,13 +496,7 @@ pub unsafe fn main() {
         
         let cs_pin = &nrf52840_peripherals.gpio_port[Pin::P0_05];
         
-        let display: &'static capsules::lpm013m126::Lpm013m126<
-            'static,
-            VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>,
-            nrf52840::gpio::GPIOPin<'_>,
-            VirtualSpiMasterDevice<'static, nrf52840::spi::SPIM>
-        >
-            = c
+        let display: &'static Screen = c
             .finalize(
                 components::lpm013m126_component_helper!(
                     nrf52840::rtc::Rtc<'static>,
@@ -505,7 +506,7 @@ pub unsafe fn main() {
                     cs_pin,
                 ),
             );
-        use kernel::hil::screen::Screen;
+        use kernel::hil::screen::Screen as _;
         //dbg!(display.set_power(true));
         //logo::init_logo_once(display);
         // userspace
@@ -518,7 +519,7 @@ pub unsafe fn main() {
                 None,
             )
             .finalize(components::screen_buffer_size!(4096));
-        screen
+        (screen, display)
     };
     
     let (gnss, gnss_pin) = {
@@ -700,18 +701,20 @@ pub unsafe fn main() {
             On,
         }
         
-        struct ButtonOff<'a, A: hil::time::Alarm<'a>> {
+        struct ButtonOff<'a, A: hil::time::Alarm<'a>, S: hil::screen::Screen> {
             pin: &'a nrf52840::gpio::GPIOPin<'a>,
             alarm: &'a A,
             state: Cell<BoardState>,
             board_kernel: &'static kernel::Kernel,
             chip: &'static nrf52840::chip::NRF52<'static, Nrf52840DefaultPeripherals<'static>>,
             gnss_power: &'a nrf52840::gpio::GPIOPin<'a>,
+            screen: &'a S,
         }
         
-        impl<'a, A: hil::time::Alarm<'a>> ButtonOff<'a, A> {
+        impl<'a, A: hil::time::Alarm<'a>, S: hil::screen::Screen> ButtonOff<'a, A, S> {
             fn peripherals_off(&self) {
                 self.gnss_power.clear();
+                self.screen.set_power(false);
             }
             /// Some peripherals won't be enabled when acquired,
             /// so enable them unconditionally
@@ -720,7 +723,7 @@ pub unsafe fn main() {
             }
         }
 
-        impl<'a, A: hil::time::Alarm<'a>> gpio::Client for ButtonOff<'a, A> {
+        impl<'a, A: hil::time::Alarm<'a>, S: hil::screen::Screen> gpio::Client for ButtonOff<'a, A, S> {
             fn fired(&self) {
                 debug!("button now {}", self.pin.read());
                 if self.pin.read() == false {
@@ -733,7 +736,7 @@ pub unsafe fn main() {
             }
         }
         
-        impl<'a, A: hil::time::Alarm<'a>> hil::time::AlarmClient for ButtonOff<'a, A> {
+        impl<'a, A: hil::time::Alarm<'a>, S: hil::screen::Screen> hil::time::AlarmClient for ButtonOff<'a, A, S> {
             fn alarm(&self) {
                 if let BoardState::On = self.state.get() {
                     debug!("Stopping all processes!");
@@ -776,6 +779,7 @@ pub unsafe fn main() {
             ButtonOff<
                 'static,
                 VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>,
+                Screen,
             >,
             ButtonOff {
                 pin: button,
@@ -784,6 +788,7 @@ pub unsafe fn main() {
                 board_kernel,
                 chip,
                 gnss_power: gnss_pin,
+                screen: screen_device,
             },
         );
         
