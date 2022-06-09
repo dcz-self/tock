@@ -622,6 +622,25 @@ pub unsafe fn main() {
     periodic.arm();
     bmp280.begin_reset().unwrap();
     
+    {
+        // React to button presses
+        use kernel::hil::gpio;
+        use gpio::{Interrupt, Configure};
+
+        struct ButtonOverride;
+        impl gpio::Client for ButtonOverride {
+            fn fired(&self) {
+                debug!("button");
+            }
+        }
+        let button = &nrf52840_peripherals.gpio_port[BUTTON_PIN];
+
+        button.make_input();
+        button.set_floating_state(gpio::FloatingState::PullUp);
+        button.set_client(&ButtonOverride);
+        button.enable_interrupts(gpio::InterruptEdge::FallingEdge);
+    }
+    
     let platform = Platform {
         temperature,
         button,
