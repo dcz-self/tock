@@ -790,29 +790,7 @@ pub unsafe fn main() {
     impl periodic::Callable for Apps{
         fn next(&mut self) -> bool {
             debug!("process load");
-            let process_management_capability =
-        create_capability!(capabilities::ProcessManagementCapability);
-            unsafe {
-            kernel::process::load_processes(
-                self.board_kernel,
-                self.chip,
-                core::slice::from_raw_parts(
-                    &_sapps as *const u8,
-                    &_eapps as *const u8 as usize - &_sapps as *const u8 as usize,
-                ),
-                core::slice::from_raw_parts_mut(
-                    &mut _sappmem as *mut u8,
-                    &_eappmem as *const u8 as usize - &_sappmem as *const u8 as usize,
-                ),
-                &mut PROCESSES,
-                &FAULT_RESPONSE,
-                &process_management_capability,
-            )
-            .unwrap_or_else(|err| {
-                debug!("Error loading processes!");
-                debug!("{:?}", err);
-            });
-            }
+            load_processes(self.board_kernel, self.chip);
             false
         }
     };
