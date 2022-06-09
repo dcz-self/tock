@@ -249,6 +249,9 @@ pub unsafe fn main() {
 
     nrf52_components::startup::NrfStartupComponent::new(
         false,
+        // the button pin cannot be used to reset the device,
+        // but the API expects some pin,
+        // so might as well give a useless one.
         BUTTON_PIN,
         nrf52840::uicr::Regulator0Output::V3_0,
         &base_peripherals.nvmc,
@@ -618,6 +621,7 @@ pub unsafe fn main() {
     //periodic_virtual_alarm.set_alarm_client(periodic);
     periodic.arm();
     bmp280.begin_reset().unwrap();
+    
     let platform = Platform {
         temperature,
         button,

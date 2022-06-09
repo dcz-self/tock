@@ -17,6 +17,8 @@ pub struct NrfStartupComponent<'a> {
 }
 
 impl<'a> NrfStartupComponent<'a> {
+    /// The `button_rst_pin` must expose the nRESET function,
+    /// otherwise it will be ignored.
     pub fn new(
         nfc_as_gpios: bool,
         button_rst_pin: Pin,
