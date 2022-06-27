@@ -72,60 +72,100 @@ impl<const S: usize> From<BlockIndex<S>> for u64 {
     }
 }
 
-impl <const S: usize> Add<u32> for BlockIndex<S> {
+impl<const S: usize> Add<u32> for BlockIndex<S> {
     type Output = Self;
     fn add(self, other: u32) -> Self {
         BlockIndex(self.0 + other)
     }
 }
 
-/// A memory region composed of consecutive `S`-sized blocks.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub struct Region<const S: usize> {
-    pub index: BlockIndex<S>,
-    pub length_blocks: u32,
-}
+/// Writeable persistent block storage device.
+///
+/// The device is formed from equally-sized storage blocks,
+/// which are arranged one after another, without gaps or overlaps,
+/// to form a linear storage of bytes.
+///
+/// There device is split into blocks in two ways, into:
+/// - prepare blocks, which are the smallest unit of space
+/// that can be prepared for writing (see `BlockStorage::prepare_write`)
+/// - write blocks, which are the smallest unit of space that can be written
+///
+/// Every byte on the device belongs to exactly one prepare block,
+/// and to exactly one write block at the same time.
+///
+/// `W`: The size of a write block in bytes.
+/// `P`: The size of a prepare block in bytes.
+pub trait BlockStorage<const W: usize, const P: usize> {
+    /// Read data from a block, and into the buffer.
+    ///
+    /// `ErrorCode::INVAL` will be returned if
+    /// - `region` exceeds the end of the device, or
+    /// - `buf` is shorter than `region`.
+    ///
+    /// Returns `ErrorCode::BUSY` when another operation is in progress.
+    ///
+    /// On success, triggers `Client::read_complete` once.
+    fn read(
+        &self,
+        region: &BlockIndex<W>,
+        buf: &'static mut [u8],
+    ) -> Result<(), (ErrorCode, &'static mut [u8])>;
 
-/// Divide, round up
-fn div_ceil(a: u64, b: u64) -> u64 {
-    a / b // FIXME: trololo
-}
+    /// Write data from a buffer to storage.
+    ///
+    /// This function writes the contents of `buf` to memory,
+    /// starting at the chosen `start_block`.
+    ///
+    /// `ErrorCode::INVAL` will be returned if
+    /// - `region` exceeds the end of the device, or
+    /// - `buf` is shorter than `region`.
+    ///
+    /// This function SHALL NOT prepare the block for writing first.
+    /// The user of this function SHOULD ensure that a block is prepared
+    /// before calling `write` (see `prepare_write`).
+    ///
+    /// Once a byte has been written as part of a write block,
+    /// it SHOULD NOT be written again until it's prepared
+    /// as part of a prepare block.
+    /// Multiple writes to the same block are possible in this trait,
+    /// but the result is dependent on the nature of the underlying hardware,
+    /// and this interface does not provide a way to discover that.
+    ///
+    /// **Note** about raw flash devices: writes can turn bits from `1` to `0`.
+    /// To change a bit from `0` to `1`, a region must be erased (prepared).
+    ///
+    /// **Note**: some raw flash hardware only allows a limited number of writes before
+    /// an erase. If that is the case, the implementation MUST return an error
+    /// `ErrorCode::NOMEM` when this happens, even if the hardware silently
+    /// ignores the write.
+    ///
+    /// Returns `ErrorCode::BUSY` when another operation is in progress.
+    ///
+    /// On success, triggers `Client::write_complete` once.
+    fn write(
+        &self,
+        region: &BlockIndex<W>,
+        buf: &'static mut [u8],
+    ) -> Result<(), (ErrorCode, &'static mut [u8])>;
 
-impl<const S: usize> Region<S> {
-    /// Returns the smallest region made of blocks which contains
-    /// the specified range of addresses.
-    pub fn new_containing(range: AddressRange) -> Self {
-        let index = BlockIndex::new_containing(range.start_address);
-        Self {
-            index,
-            length_blocks: {
-                div_ceil(
-                    range.start_address % S as u64 + range.length_bytes as u64,
-                    S as u64,
-                ) as u32
-                // CAUTION: div_ceil is nightly
-            },
-        }
-    }
+    /// Makes a region ready for writing.
+    ///
+    /// This corresponds roughly to the erase operation on raw flash devices,
+    /// but may also do nothing on devices where erasure is not necessary.
+    ///
+    /// Calling `prepare_write` may modify bytes in the selected `region`
+    /// (typically, on raw flash devices, all bits will be set,
+    /// i.e. each byte turns to 0xFF).
+    ///
+    /// If `region` exceeds the size of the device, returns `ErrorCode::INVAL`.
+    ///
+    /// Returns `ErrorCode::BUSY` when another operation is in progress.
+    ///
+    /// On success, triggers `Client::prepare_write_complete` once.
+    fn prepare_write(&self, region: &BlockIndex<P>) -> Result<(), ErrorCode>;
 
-    /// Returns the region starting and ending exactly in the same places
-    /// as the given `range`, if such exists.
-    pub fn new_exact(range: AddressRange) -> Option<Self> {
-        BlockIndex::new_starting_at(range.start_address).and_then(|index| {
-            if range.length_bytes % S as u32 == 0 {
-                Some(Self {
-                    index,
-                    length_blocks: range.length_bytes / S as u32,
-                })
-            } else {
-                None
-            }
-        })
-    }
-
-    pub fn get_length_bytes(&self) -> u32 {
-        self.length_blocks * S as u32
-    }
+    /// Returns the size of the device in bytes.
+    fn get_size(&self) -> u64;
 }
 
 /// Specifies a storage area with byte granularity.
@@ -142,113 +182,24 @@ impl AddressRange {
     }
 }
 
-impl<const S: usize> From<Region<S>> for AddressRange {
-    fn from(region: Region<S>) -> Self {
-        let length_bytes = region.get_length_bytes();
-        Self {
-            start_address: region.index.into(),
-            length_bytes,
-        }
-    }
-}
-
-/// Writeable persistent block storage device.
-///
-/// The device is formed from equally-sized storage blocks,
-/// which are arranged one after another, without gaps or overlaps,
-/// to form a linear storage of bytes.
-///
-/// There device is split into blocks in two ways, into:
-/// - erase blocks, which are the smallest unit of space that can be erased
-/// - write blocks, which are the smallest unit of space that can be written
-///
-/// Every byte on the device belongs to exactly one erase block,
-/// and to exactly one write block at the same time.
-///
-/// `W`: The size of a write block in bytes.
-/// `E`: The size of an erase block in bytes.
-pub trait BlockStorage<const W: usize, const E: usize> {
-    /// Read data from flash into a buffer.
+/// Devices which can read arbitrary byte-indexed ranges.
+pub trait ReadRange {
+    /// Read data from storage into a buffer.
     ///
-    /// This function will read data stored in flash at `range` into `buf`.
+    /// This function will read data stored in storage at `range` into `buf`.
     ///
     /// `ErrorCode::INVAL` will be returned if
     /// - `range` exceeds the end of the device, or
     /// - `buf` is shorter than `range`.
     ///
+    /// Returns `ErrorCode::BUSY` when another operation is in progress.
+    ///
     /// On success, triggers `Client::read_complete` once.
-    /// On failure returns a `ErrorCode` and the buffer passed in.
-    /// If `ErrorCode::NOSUPPORT` is returned then `read_block`
-    /// should be used instead.
     fn read_range(
         &self,
         range: &AddressRange,
         buf: &'static mut [u8],
     ) -> Result<(), (ErrorCode, &'static mut [u8])>;
-
-    /// Read data from blocks starting at `block`, and into the buffer.
-    ///
-    /// `ErrorCode::INVAL` will be returned if
-    /// - `range` exceeds the end of the device, or
-    /// - `buf` is shorter than `region`.
-    ///
-    /// On success, triggers `Client::read_complete` once.
-    fn read(
-        &self,
-        region: &Region<W>,
-        buf: &'static mut [u8],
-    ) -> Result<(), (ErrorCode, &'static mut [u8])>;
-
-    /// Write data from a buffer to flash.
-    ///
-    /// This function writes the contents of `buf` to memory,
-    /// starting at the chosen `start_block`.
-    ///
-    /// `ErrorCode::INVAL` will be returned if
-    /// - `range` exceeds the end of the device, or
-    /// - `buf` is shorter than `region`.
-    ///
-    /// This function SHALL NOT prepare the block for writing first.
-    /// The user of this function SHOULD ensure that a block is erased
-    /// before calling `write` (see `erase`).
-    ///
-    /// Once a byte has been written as part of a write block,
-    /// it SHOULD NOT be written again until it's erased as part of an erase block.
-    /// Multiple writes to the same block are possible in this trait,
-    /// but the result is dependent on the nature of the underlying hardware,
-    /// and this interface does not provide a way to discover that.
-    ///
-    /// **Note** about raw flash devices: writes can turn bits from `1` to `0`.
-    /// To change a bit from `0` to `1`, a region must be erased.
-    ///
-    /// **Note**: some raw flash hardware only allows a limited number of writes before
-    /// an erase. If that is the case, the implementation MUST return an error
-    /// `ErrorCode::NOMEM` when this happens, even if the hardware silently
-    /// ignores the write.
-    ///
-    /// On success, triggers `Client::write_complete` once.
-    /// On failure returns a `ErrorCode` and the buffer passed in.
-    fn write(
-        &self,
-        region: &Region<W>,
-        buf: &'static mut [u8],
-    ) -> Result<(), (ErrorCode, &'static mut [u8])>;
-
-    /// Makes a region ready for writing.
-    ///
-    /// This corresponds roughly to the erase operation on raw flash devices,
-    /// but may also do nothing on devices where erasure is not necessary.
-    ///
-    /// Calling `erase` may modify bytes in the selected `region` in any way
-    /// (typically, on raw flash devices, all bits will be set,
-    /// i.e. each byte turns to 0xFF).
-    ///
-    /// If `region` exceeds the size of the device, returns `ErrorCode::INVAL`.
-    /// On success, triggers `Client::erase_complete` once.
-    fn erase(&self, region: &Region<E>) -> Result<(), ErrorCode>;
-
-    /// Returns the size of the device in bytes.
-    fn get_size(&self) -> Result<u64, ErrorCode>;
 }
 
 pub trait HasClient<'a, C> {
@@ -259,18 +210,28 @@ pub trait HasClient<'a, C> {
 
 /// Implement `Client` to receive callbacks from `BlockStorage`.
 pub trait Client<const W: usize, const E: usize> {
-    /// Block read complete.
+    /// This will be called when a read operation is complete.
     ///
-    /// This will be called when the read operation is complete.
+    /// If the device is unable to read the region, returns `ErrorCode::FAIL`.
+    ///
+    /// On errors, the buffer contents are undefined.
     fn read_complete(&self, read_buffer: &'static mut [u8], ret: Result<(), ErrorCode>);
 
-    /// Block write complete.
-    ///
     /// This will be called when the write operation is complete.
+    ///
+    /// If the device is unable to write to the region,
+    /// returns `ErrorCode::FAIL`.
+    ///
+    /// On errors, the contents of the storage region are undefined,
+    /// and the region must be considered no longer prepared for writing.
     fn write_complete(&self, write_buffer: &'static mut [u8], ret: Result<(), ErrorCode>);
 
-    /// Block erase complete.
-    ///
     /// This will be called when the erase operation is complete.
-    fn erase_complete(&self, ret: Result<(), ErrorCode>);
+    ///
+    /// If the device is unable to prepare the region,
+    /// returns `ErrorCode::FAIL`.
+    ///
+    /// On errors, the contents of the storage region are undefined,
+    /// and the region must be considered not prepared for writing.
+    fn prepare_write_complete(&self, ret: Result<(), ErrorCode>);
 }
