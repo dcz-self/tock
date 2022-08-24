@@ -91,7 +91,7 @@ pub struct Platform {
             nrf52840::gpio::GPIOPin<'static>,
             VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>
         >,
-        { mx25r6435f::PAGE_SIZE },
+        4096,
         4096,
     >,
     ieee802154_radio: &'static capsules::ieee802154::RadioDriver<'static>,
@@ -446,7 +446,7 @@ pub unsafe fn main() {
                 nrf52840::gpio::GPIOPin<'static>,
                 VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>
             >,
-            { mx25r6435f::PAGE_SIZE },
+            4096,
             4096,
         ));
 

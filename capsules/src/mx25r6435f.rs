@@ -59,12 +59,12 @@ use kernel::utilities::cells::OptionalCell;
 use kernel::utilities::cells::TakeCell;
 use kernel::ErrorCode;
 
-pub static mut TXBUFFER: [u8; PAGE_SIZE + 4] = [0; PAGE_SIZE + 4];
-pub static mut RXBUFFER: [u8; PAGE_SIZE + 4] = [0; PAGE_SIZE + 4];
+pub static mut TXBUFFER: [u8; PAGE_SIZE as usize + 4] = [0; PAGE_SIZE as usize + 4];
+pub static mut RXBUFFER: [u8; PAGE_SIZE as usize + 4] = [0; PAGE_SIZE as usize + 4];
 
 const SPI_SPEED: u32 = 8000000;
 pub const SECTOR_SIZE: usize = 4096;
-pub const PAGE_SIZE: usize = 256;
+const PAGE_SIZE: u32 = 256;
 
 // TODO: remove alias
 type Mx25r6435fSector = [u8];
@@ -81,10 +81,12 @@ enum Opcodes {
 }
 
 #[derive(Clone, Copy, PartialEq)]
+    Write { page_index: u32 },
 enum State {
     Idle,
 
     ReadSector {
+        sector_index: u32,
         page_index: u32,
     },
 
@@ -96,24 +98,20 @@ enum State {
     EraseSectorDone,
 
     WriteSectorWriteEnable {
-        region: WriteRegion,
-        /// Offset into region
-        block_offset: u32,
+        sector_index: u32,
+        page_index: u32,
     },
     WriteSectorWrite {
-        region: WriteRegion,
-        /// Offset into region
-        block_offset: u32,
+        sector_index: u32,
+        page_index: u32,
     },
     WriteSectorCheckDone {
-        region: WriteRegion,
-        /// Offset into region
-        block_offset: u32,
+        sector_index: u32,
+        page_index: u32,
     },
     WriteSectorWaitDone {
-        region: WriteRegion,
-        /// Offset into region
-        block_offset: u32,
+        sector_index: u32,
+        page_index: u32,
     },
 
     ReadId,
@@ -132,7 +130,7 @@ pub struct MX25R6435F<
     hold_pin: Option<&'a P>,
     txbuffer: TakeCell<'static, [u8]>,
     rxbuffer: TakeCell<'static, [u8]>,
-    client: OptionalCell<&'a dyn hil::block_storage::Client<PAGE_SIZE, SECTOR_SIZE>>,
+    client: OptionalCell<&'a dyn hil::block_storage::Client<SECTOR_SIZE, SECTOR_SIZE>>,
     client_sector: TakeCell<'static, Mx25r6435fSector>,
 }
 
@@ -228,9 +226,9 @@ impl<
         self.enable_write()
     }
 
-    fn read_page(
+    fn read_sector(
         &self,
-        page_index: u32,
+        sector_index: u32,
         sector: &'static mut Mx25r6435fSector,
     ) -> Result<(), (ErrorCode, &'static mut Mx25r6435fSector)> {
         match self.configure_spi() {
@@ -242,16 +240,16 @@ impl<
                         self.rxbuffer
                             .take()
                             .map_or(Err(ErrorCode::RESERVE), move |rxbuffer| {
-                                let address = page_index * PAGE_SIZE as u32;
                                 // Setup the read instruction
                                 txbuffer[0] = Opcodes::READ as u8;
-                                txbuffer[1] = (address >> 16) as u8;
-                                txbuffer[2] = (address >> 8) as u8;
-                                txbuffer[3] = (address >> 0) as u8;
+                                txbuffer[1] = ((sector_index * SECTOR_SIZE as u32) >> 16) as u8;
+                                txbuffer[2] = ((sector_index * SECTOR_SIZE as u32) >> 8) as u8;
+                                txbuffer[3] = ((sector_index * SECTOR_SIZE as u32) >> 0) as u8;
 
                                 // Call the SPI driver to kick things off.
                                 self.state.set(State::ReadSector {
-                                    page_index,
+                                    sector_index,
+                                    page_index: 0,
                                 });
                                 if let Err((err, txbuffer, rxbuffer)) = self.spi.read_write_bytes(
                                     txbuffer,
@@ -279,32 +277,28 @@ impl<
         }
     }
 
-    fn write_pages(
+    fn write_sector(
         &self,
-        region: &WriteRegion,
-        buffer: &'static mut [u8],
+        sector_index: u32,
+        sector: &'static mut Mx25r6435fSector,
     ) -> Result<(), (ErrorCode, &'static mut Mx25r6435fSector)> {
-        if region.get_length_bytes() as usize > buffer.len() {
-            Err((ErrorCode::SIZE, buffer))
-        } else {
-            match self.configure_spi() {
-                Ok(()) => {
-                    self.state.set(State::WriteSectorWriteEnable {
-                        region: *region,
-                        block_offset: 0,
-                    });
-                    let retval = self.enable_write();
+        match self.configure_spi() {
+            Ok(()) => {
+                self.state.set(State::EraseSectorWriteEnable {
+                    sector_index,
+                    operation: Operation::Write { sector_index },
+                });
+                let retval = self.enable_write();
 
-                    match retval {
-                        Ok(()) => {
-                            self.client_sector.replace(buffer);
-                            Ok(())
-                        }
-                        Err(ecode) => Err((ecode, buffer)),
+                match retval {
+                    Ok(()) => {
+                        self.client_sector.replace(sector);
+                        Ok(())
                     }
+                    Err(ecode) => Err((ecode, sector)),
                 }
-                Err(error) => Err((error, buffer)),
             }
+            Err(error) => Err((error, sector)),
         }
     }
 }
@@ -335,23 +329,44 @@ impl<
                 });
             }
             State::ReadSector {
-                page_index: _
             } => {
                 self.client_sector.take().map(|sector| {
                     read_buffer.map(move |read_buffer| {
                         // Copy read in bytes to user page
-                        for i in 0..PAGE_SIZE {
+                        for i in 0..(PAGE_SIZE as usize) {
                             // Skip the command and address bytes (hence the +4).
-                            sector[i] = read_buffer[i + 4];
+                            sector[i + (page_index * PAGE_SIZE) as usize] = read_buffer[i + 4];
                         }
 
-                        self.state.set(State::Idle);
-                        self.txbuffer.replace(write_buffer);
-                        self.rxbuffer.replace(read_buffer);
+                        if (page_index + 1) * PAGE_SIZE == SECTOR_SIZE as u32 {
+                            // Done reading
+                            self.state.set(State::Idle);
+                            self.txbuffer.replace(write_buffer);
+                            self.rxbuffer.replace(read_buffer);
 
-                        self.client.map(move |client| {
-                            client.read_complete(sector, Ok(()));
-                        });
+                            self.client.map(move |client| {
+                                client.read_complete(sector, Ok(()));
+                            });
+                        } else {
+                            let address =
+                                (sector_index * SECTOR_SIZE as u32) + ((page_index + 1) * PAGE_SIZE);
+                            write_buffer[0] = Opcodes::READ as u8;
+                            write_buffer[1] = (address >> 16) as u8;
+                            write_buffer[2] = (address >> 8) as u8;
+                            write_buffer[3] = (address >> 0) as u8;
+
+                            self.state.set(State::ReadSector {
+                                sector_index,
+                                page_index: page_index + 1,
+                            });
+                            self.client_sector.replace(sector);
+                            // TODO verify SPI return value
+                            let _ = self.spi.read_write_bytes(
+                                write_buffer,
+                                Some(read_buffer),
+                                (PAGE_SIZE + 4) as usize,
+                            );
+                        }
                     });
                 });
             }
@@ -359,11 +374,10 @@ impl<
                 sector_index,
             } => {
                 self.state.set(State::EraseSectorErase);
-                let address = sector_index * SECTOR_SIZE as u32;
                 write_buffer[0] = Opcodes::SE as u8;
-                write_buffer[1] = (address >> 16) as u8;
-                write_buffer[2] = (address >> 8) as u8;
-                write_buffer[3] = (address >> 0) as u8;
+                write_buffer[1] = ((sector_index * SECTOR_SIZE as u32) >> 16) as u8;
+                write_buffer[2] = ((sector_index * SECTOR_SIZE as u32) >> 8) as u8;
+                write_buffer[3] = ((sector_index * SECTOR_SIZE as u32) >> 0) as u8;
 
                 // TODO verify SPI return value
                 let _ = self.spi.read_write_bytes(write_buffer, None, 4);
@@ -388,7 +402,14 @@ impl<
                             .read_write_bytes(write_buffer, Some(read_buffer), 2);
                     } else {
                         // Erase has finished, so jump to the next state.
-                        self.state.set(State::EraseSectorDone);
+                        let next_state = match operation {
+                            Operation::Erase => State::EraseSectorDone,
+                            Operation::Write { sector_index } => State::WriteSectorWriteEnable {
+                                sector_index,
+                                page_index: 0,
+                            },
+                        };
+                        self.state.set(next_state);
                         self.rxbuffer.replace(read_buffer);
                         self.read_write_done(write_buffer, None, len, read_write_status);
                     }
@@ -402,9 +423,14 @@ impl<
                     client.erase_complete(Ok(()));
                 });
             }
-            State::WriteSectorWriteEnable { region, block_offset } => {
-                if region.length_blocks == block_offset {
-                    // Finished
+            State::WriteSectorWriteEnable {
+                sector_index,
+                page_index,
+            } => {
+                // Check if we are done. This happens when we have written a
+                // sector's worth of data, one page at a time.
+                if page_index * PAGE_SIZE == SECTOR_SIZE as u32 {
+                    // No need to disable writes since it happens automatically.
                     self.state.set(State::Idle);
                     self.txbuffer.replace(write_buffer);
                     self.client.map(|client| {
@@ -414,7 +440,8 @@ impl<
                     });
                 } else {
                     self.state.set(State::WriteSectorWrite {
-                        region, block_offset,
+                        sector_index,
+                        page_index,
                     });
                     // Need to write enable before each PP
                     write_buffer[0] = Opcodes::WREN as u8;
@@ -422,33 +449,49 @@ impl<
                     let _ = self.spi.read_write_bytes(write_buffer, None, 1);
                 }
             }
-            State::WriteSectorWrite { region, block_offset } => {
-                self.state.set(State::WriteSectorCheckDone{ region, block_offset });
-                let address = u64::from(region.index + block_offset) as u32;
+            State::WriteSectorWrite {
+                sector_index,
+                page_index,
+            } => {
+                // Continue writing page by page.
+                self.state.set(State::WriteSectorCheckDone {
+                    sector_index,
+                    page_index: page_index + 1,
+                });
+                let address = (sector_index * SECTOR_SIZE as u32) + (page_index * PAGE_SIZE);
                 write_buffer[0] = Opcodes::PP as u8;
                 write_buffer[1] = (address >> 16) as u8;
                 write_buffer[2] = (address >> 8) as u8;
                 write_buffer[3] = (address >> 0) as u8;
 
                 self.client_sector.map(|sector| {
-                    for i in 0..PAGE_SIZE {
-                        write_buffer[i + 4] = sector[(block_offset as usize * PAGE_SIZE)..][i];
+                    for i in 0..(PAGE_SIZE as usize) {
+                        write_buffer[i + 4] = sector[i + (page_index * PAGE_SIZE) as usize];
                     }
                 });
 
                 let _ = self
                     .spi
-                    .read_write_bytes(write_buffer, None, PAGE_SIZE);
+                    .read_write_bytes(write_buffer, None, (PAGE_SIZE + 4) as usize);
             }
-            State::WriteSectorCheckDone { region, block_offset } => {
-                self.state.set(State::WriteSectorWaitDone { region, block_offset });
+            State::WriteSectorCheckDone {
+                sector_index,
+                page_index,
+            } => {
+                self.state.set(State::WriteSectorWaitDone {
+                    sector_index,
+                    page_index,
+                });
                 self.txbuffer.replace(write_buffer);
                 // Datasheet says write page takes 3.2 ms on average. So we wait
                 // that long.
                 let delay = self.alarm.ticks_from_us(3200);
                 self.alarm.set_alarm(self.alarm.now(), delay);
             }
-            State::WriteSectorWaitDone { region, block_offset } => {
+            State::WriteSectorWaitDone {
+                sector_index,
+                page_index,
+            } => {
                 read_buffer.map(move |read_buffer| {
                     let status = read_buffer[1];
 
@@ -460,9 +503,9 @@ impl<
                             .read_write_bytes(write_buffer, Some(read_buffer), 2);
                     } else {
                         // Write has finished, so go back to writing.
-                        self.state.set(State::WriteSectorWriteEnable{
-                            region,
-                            block_offset: block_offset + 1,
+                        self.state.set(State::WriteSectorWriteEnable {
+                            sector_index,
+                            page_index,
                         });
                         self.rxbuffer.replace(read_buffer);
                         self.read_write_done(write_buffer, None, len, read_write_status);
@@ -495,15 +538,14 @@ impl<
     }
 }
 
-pub type WriteRegion = hil::block_storage::Region<PAGE_SIZE>;
-pub type EraseRegion = hil::block_storage::Region<SECTOR_SIZE>;
+ pub type Region = hil::block_storage::Region<SECTOR_SIZE>;
 
 impl<
         'a,
         S: hil::spi::SpiMasterDevice + 'a,
         P: hil::gpio::Pin + 'a,
         A: hil::time::Alarm<'a> + 'a,
-    > hil::block_storage::BlockStorage<PAGE_SIZE, SECTOR_SIZE> for MX25R6435F<'a, S, P, A>
+    > hil::block_storage::BlockStorage<SECTOR_SIZE, SECTOR_SIZE> for MX25R6435F<'a, S, P, A>
 {
     fn read_range(
         &self,
@@ -515,7 +557,7 @@ impl<
 
     fn read(
         &self,
-        region: &WriteRegion,
+        region: &Region,
         buf: &'static mut [u8],
     ) -> Result<(), (ErrorCode, &'static mut [u8])> {
         let errs = if buf.len() < region.get_length_bytes() as usize {
@@ -529,14 +571,14 @@ impl<
         };
 
         match errs {
-            Ok(()) => self.read_page(region.index.0, buf),
+            Ok(()) => self.read_sector(region.index.0, buf),
             Err(e) => Err((e, buf)),
         }
     }
 
     fn write(
         &self,
-        region: &WriteRegion,
+        region: &Region,
         buf: &'static mut [u8],
     ) -> Result<(), (ErrorCode, &'static mut [u8])> {
         let errs = if buf.len() < region.get_length_bytes() as usize {
@@ -550,12 +592,12 @@ impl<
         };
 
         match errs {
-            Ok(()) => self.write_pages(region, buf),
+            Ok(()) => self.write_sector(region.index.0, buf),
             Err(e) => Err((e, buf)),
         }
     }
 
-    fn erase(&self, region: &EraseRegion) -> Result<(), ErrorCode> {
+    fn erase(&self, region: &Region) -> Result<(), ErrorCode> {
         if AddressRange::from(*region).get_end_address() > self.get_size().unwrap() {
             Err(ErrorCode::INVAL)
         } else if region.length_blocks != 1 {
@@ -578,7 +620,7 @@ impl<
         S: hil::spi::SpiMasterDevice + 'a,
         P: hil::gpio::Pin + 'a,
         A: hil::time::Alarm<'a> + 'a,
-        C: hil::block_storage::Client<PAGE_SIZE, SECTOR_SIZE>,
+        C: hil::block_storage::Client<SECTOR_SIZE, SECTOR_SIZE>,
     > hil::block_storage::HasClient<'a, C> for MX25R6435F<'a, S, P, A>
 {
     fn set_client(&self, client: &'a C) {

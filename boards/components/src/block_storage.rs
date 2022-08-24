@@ -18,15 +18,13 @@ use kernel::capabilities;
 use kernel::component::Component;
 use kernel::create_capability;
 use kernel::hil;
-use kernel::static_init_half;
+use kernel::utilities;
+use kernel::{static_init, static_init_half};
 
-/// Setup static space for the objects.
-/// B: the block device type.
-/// W: Write block size.
-/// E: Discard block size.
+// Setup static space for the objects.
 #[macro_export]
 macro_rules! block_storage_component_helper {
-    ($B:ty, $W:tt, $E: tt $(,)?) => {{
+    ($B:ty, $W: literal, $E: literal $(,)?) => {{
         use capsules::block_storage_driver::BlockStorage;
         use core::mem::MaybeUninit;
         use kernel::hil;
