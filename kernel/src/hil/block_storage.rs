@@ -23,9 +23,11 @@
 //! }
 //! ```
 use crate::ErrorCode;
+use core::ops::Add;
 
 /// An index to a block within device composed of `S`-sized blocks.
-#[derive(Clone, Copy)]
+/// Stores the number of blocks from the start of the device.
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct BlockIndex<const S: usize>(pub u32);
 
 impl<const S: usize> BlockIndex<S> {
@@ -50,8 +52,14 @@ impl<const S: usize> From<BlockIndex<S>> for u64 {
     }
 }
 
+impl<const S: usize> Add<u32> for BlockIndex<S> {
+    type Output = Self;
+    fn add(self, other: u32) -> Self {
+        BlockIndex(self.0 + other)
+    }
+}
+
 /// Readable persistent block storage device.
-#[derive(Clone, Copy)]
 ///
 /// The device is formed from equally-sized storage blocks,
 /// which are arranged one after another, without gaps or overlaps,
@@ -149,8 +157,8 @@ pub trait Storage<const W: usize, const D: usize>:
 {
 }
 
-impl<T, const W: usize, const D: usize, > Storage<W, D>
-    for T where T: ReadableStorage<W> + WriteableStorage<W, D>
+impl<const W: usize, const D: usize, T: ReadableStorage<W> + WriteableStorage<W, D>> Storage<W, D>
+    for T
 {
 }
 

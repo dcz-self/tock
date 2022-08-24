@@ -15,7 +15,7 @@ use core::cmp;
 
 use kernel::grant::{AllowRoCount, AllowRwCount, Grant, UpcallCount};
 use kernel::hil;
-use kernel::hil::block_storage::{BlockIndex, Region};
+use kernel::hil::block_storage::BlockIndex;
 use kernel::processbuffer::{ReadableProcessBuffer, WriteableProcessBuffer};
 use kernel::syscall::{CommandReturn, SyscallDriver};
 use kernel::utilities::cells::TakeCell;
@@ -24,19 +24,20 @@ use kernel::{ErrorCode, ProcessId};
 use crate::driver;
 pub const DRIVER_NUM: usize = driver::NUM::BlockStorage as usize;
 
+#[allow(non_camel_case_types)]
 enum Command {
     CHECK = 0,
     /// device size in bytes
     SIZE = 1,
-    /// Size of write, erase blocks.
+    /// Size of write, discard blocks.
     /// Separate from size because doesn't fit in one return call.
     GEOMETRY = 2,
     /// Read an arbitrary range from an arbitrary address.
     READ_RANGE = 3,
     /// Read a single write block at given block index.
     READ = 4,
-    /// Erase a single erase block at given block index.
-    ERASE = 5,
+    /// Discard a single discard block at given block index.
+    DISCARD = 5,
     /// Write a single write block at given block index.
     WRITE = 6,
 }
@@ -50,7 +51,7 @@ impl TryFrom<usize> for Command {
             2 => Ok(Command::GEOMETRY),
             3 => Ok(Command::READ_RANGE),
             4 => Ok(Command::READ),
-            5 => Ok(Command::ERASE),
+            5 => Ok(Command::DISCARD),
             6 => Ok(Command::WRITE),
             _ => Err(()),
         }
@@ -73,7 +74,7 @@ mod rw_allow {
 
 enum Upcall {
     READ = 0,
-    ERASE = 1,
+    DISCARD = 1,
     WRITE = 2,
 }
 
@@ -89,26 +90,26 @@ enum Operation {
 #[derive(Clone, Copy)]
 struct State {
     read: Operation,
-    erase: Operation,
+    discard: Operation,
     write: Operation,
 }
 
-/// Userspace interface for `hil::block_storage::BlockStorage`.
+/// Userspace interface for `hil::block_storage::Storage`.
 ///
 /// Supports only one command of a given type at a time
 /// (but may support only one command in flight at all,
 /// if that's what the underlying device does).
 ///
-/// Requires a buffer of size at least `W`.
+/// Requires a bounce buffer of size at least `W` bytes.
 ///
-/// `W` is the size of a write block, `E` is the erase block size.
+/// `W` is the size of a write block, `E` is the discard block size.
 pub struct BlockStorage<'a, T, const W: usize, const E: usize>
 where
-    T: hil::block_storage::BlockStorage<W, E>,
+    T: hil::block_storage::Storage<W, E>,
 {
-    // The underlying physical storage device.
+    /// The underlying physical storage device.
     device: &'a T,
-    // Per-app state.
+    /// Per-app state.
     apps: Grant<
         (),
         UpcallCount<UPCALL_COUNT>,
@@ -116,12 +117,13 @@ where
         AllowRwCount<{ rw_allow::COUNT }>,
     >,
     state: Cell<State>,
+    /// Bounce buffer because using userspace buffers for DMA is impossible
     buffer: TakeCell<'static, [u8]>,
 }
 
 impl<T, const W: usize, const E: usize> BlockStorage<'static, T, W, E>
 where
-    T: hil::block_storage::BlockStorage<W, E>,
+    T: hil::block_storage::Storage<W, E>,
 {
     pub fn new(
         device: &'static T,
@@ -138,79 +140,68 @@ where
             apps: grant,
             state: Cell::new(State {
                 read: Operation::None,
-                erase: Operation::None,
+                discard: Operation::None,
                 write: Operation::None,
             }),
             buffer: TakeCell::new(buffer),
         }
     }
 
-    fn start_read(&self, region: &Region<W>, appid: ProcessId)
-        -> Result<(), ErrorCode>
-    {
+    fn start_read(&self, region: &BlockIndex<W>, appid: ProcessId) -> Result<(), ErrorCode> {
         let state = self.state.get();
         match state.read {
             Operation::Requested(..) => Err(ErrorCode::BUSY),
             Operation::None => self.buffer.take().map_or_else(
                 || Err(ErrorCode::NOMEM),
-                |buffer| {
-                    match self.device.read(region, buffer) {
-                        Ok(()) => {
-                            self.state.set(State {
-                                read: Operation::Requested(appid),
-                                ..state
-                            });
-                            Ok(())
-                        },
-                        Err((e, buf)) => {
-                            self.buffer.replace(buf);
-                            Err(e)
-                        }
+                |buffer| match self.device.read(region, buffer) {
+                    Ok(()) => {
+                        self.state.set(State {
+                            read: Operation::Requested(appid),
+                            ..state
+                        });
+                        Ok(())
                     }
-                }
+                    Err((e, buf)) => {
+                        self.buffer.replace(buf);
+                        Err(e)
+                    }
+                },
             ),
         }
     }
-    
-    fn start_erase(&self, region: &Region<E>, appid: ProcessId)
-        -> Result<(), ErrorCode>
-    {
+
+    fn start_discard(&self, region: &BlockIndex<E>, appid: ProcessId) -> Result<(), ErrorCode> {
         let state = self.state.get();
-        match state.erase {
+        match state.discard {
             Operation::Requested(..) => Err(ErrorCode::BUSY),
-            Operation::None => self.device.erase(region).map(|()| {
+            Operation::None => self.device.discard(region).map(|()| {
                 self.state.set(State {
-                    erase: Operation::Requested(appid),
+                    discard: Operation::Requested(appid),
                     ..state
                 });
             }),
         }
     }
-    
-    
-    fn start_write(&self, region: &Region<W>, app_id: ProcessId)
-        -> Result<(), ErrorCode>
-    {
+
+    fn start_write(&self, region: &BlockIndex<W>, app_id: ProcessId) -> Result<(), ErrorCode> {
         let state = self.state.get();
         match state.write {
             Operation::Requested(..) => Err(ErrorCode::BUSY),
             Operation::None => self.buffer.take().map_or_else(
                 || Err(ErrorCode::NOMEM),
                 |buffer| {
-                    let ret = self
-                        .apps
-                        .enter(app_id, |_, kernel_data| {
-                            kernel_data
-                                .get_readonly_processbuffer(ro_allow::WRITE)
-                                .and_then(|write| {
-                                    write.enter(|app_buffer| {
-                                        let write_len = cmp::min(app_buffer.len(), W as usize);
+                    let ret = self.apps.enter(app_id, |_, kernel_data| {
+                        kernel_data
+                            .get_readonly_processbuffer(ro_allow::WRITE)
+                            .and_then(|write| {
+                                write.enter(|app_buffer| {
+                                    let write_len = cmp::min(app_buffer.len(), W as usize);
 
-                                        let app_buffer = &app_buffer[0..(write_len)];
-                                        app_buffer.copy_to_slice(&mut buffer[0..write_len]);
-                                    })
+                                    let app_buffer = &app_buffer[0..(write_len)];
+                                    app_buffer.copy_to_slice(&mut buffer[0..write_len]);
                                 })
-                        });
+                            })
+                    });
                     let ret = match ret {
                         // Failed to enter
                         Err(e) => Err((ErrorCode::from(e), buffer)),
@@ -223,32 +214,30 @@ where
                                     ..state
                                 });
                                 Ok(())
-                            },
+                            }
                             e => e,
-                            //Err((e, b)) => Err((ErrorCode::from(e), b)),  
                         },
                     };
                     ret.map_err(|(e, buf)| {
                         self.buffer.replace(buf);
                         e
-                    })  
-                }
+                    })
+                },
             ),
         }
     }
-    
 }
 
-impl<T, const W: usize, const E: usize> hil::block_storage::Client<W, E> for BlockStorage<'_, T, W, E>
+impl<T, const W: usize, const E: usize> hil::block_storage::ReadableClient
+    for BlockStorage<'_, T, W, E>
 where
-    T: hil::block_storage::BlockStorage<W, E>,
+    T: hil::block_storage::Storage<W, E>,
 {
     fn read_complete(&self, read_buffer: &'static mut [u8], ret: Result<(), ErrorCode>) {
         let state = self.state.get();
         match state.read {
             Operation::Requested(app_id) => {
-                self
-                    .apps
+                self.apps
                     .enter(app_id, move |_, kernel_data| {
                         let ret = match ret {
                             Ok(()) => {
@@ -264,7 +253,7 @@ where
                                         })
                                     })
                                     .map_err(ErrorCode::from)
-                            },
+                            }
                             Err(e) => Err(e),
                         };
 
@@ -274,21 +263,25 @@ where
                             read: Operation::None,
                             ..state
                         });
-                        
+
                         // And then signal the app.
-                        let upcall_data = ret.map_or_else(
-                            |e| (1, e.into(), 0),
-                            |()| (0, 0, 0),
-                        );
-                        kernel_data.schedule_upcall(Upcall::READ as usize, upcall_data)
+                        let upcall_data = ret.map_or_else(|e| (1, e.into(), 0), |()| (0, 0, 0));
+                        kernel_data
+                            .schedule_upcall(Upcall::READ as usize, upcall_data)
                             .unwrap_or_else(|e| kernel::debug!("Can't upcall: {:?}", e))
                     })
                     .unwrap_or_else(|e| kernel::debug!("Can't get grant: {:?}", e))
-            },
+            }
             _ => kernel::debug!("Unexpected read reply"),
         }
     }
+}
 
+impl<T, const W: usize, const E: usize> hil::block_storage::WriteableClient
+    for BlockStorage<'_, T, W, E>
+where
+    T: hil::block_storage::Storage<W, E>,
+{
     /// Block write complete.
     ///
     /// This will be called when the write operation is complete.
@@ -296,54 +289,48 @@ where
         let state = self.state.get();
         match state.write {
             Operation::Requested(app_id) => {
-                self
-                    .apps
+                self.apps
                     .enter(app_id, move |_, kernel_data| {
                         self.state.set(State {
                             write: Operation::None,
                             ..state
                         });
                         self.buffer.replace(write_buffer);
-                        
+
                         // And then signal the app.
-                        let upcall_data = ret.map_or_else(
-                            |e| (1, e.into(), 0),
-                            |()| (0, 0, 0),
-                        );
-                        kernel_data.schedule_upcall(Upcall::WRITE as usize, upcall_data)
+                        let upcall_data = ret.map_or_else(|e| (1, e.into(), 0), |()| (0, 0, 0));
+                        kernel_data
+                            .schedule_upcall(Upcall::WRITE as usize, upcall_data)
                             .unwrap_or_else(|e| kernel::debug!("Can't upcall: {:?}", e))
                     })
                     .unwrap_or_else(|e| kernel::debug!("Can't get grant: {:?}", e))
-            },
+            }
             _ => kernel::debug!("Unexpected read reply"),
         }
     }
 
-    /// Block erase complete.
+    /// Block discard complete.
     ///
-    /// This will be called when the erase operation is complete.
-    fn erase_complete(&self, ret: Result<(), ErrorCode>) {
+    /// This will be called when the discard operation is complete.
+    fn discard_complete(&self, ret: Result<(), ErrorCode>) {
         let state = self.state.get();
-        match state.erase {
+        match state.discard {
             Operation::Requested(app_id) => {
-                self
-                    .apps
+                self.apps
                     .enter(app_id, move |_, kernel_data| {
                         self.state.set(State {
-                            erase: Operation::None,
+                            discard: Operation::None,
                             ..state
                         });
-                        
+
                         // And then signal the app.
-                        let upcall_data = ret.map_or_else(
-                            |e| (1, e.into(), 0),
-                            |()| (0, 0, 0),
-                        );
-                        kernel_data.schedule_upcall(Upcall::ERASE as usize, upcall_data)
+                        let upcall_data = ret.map_or_else(|e| (1, e.into(), 0), |()| (0, 0, 0));
+                        kernel_data
+                            .schedule_upcall(Upcall::DISCARD as usize, upcall_data)
                             .unwrap_or_else(|e| kernel::debug!("Can't upcall: {:?}", e))
                     })
                     .unwrap_or_else(|e| kernel::debug!("Can't get grant: {:?}", e))
-            },
+            }
             _ => kernel::debug!("Unexpected read reply"),
         }
     }
@@ -351,7 +338,7 @@ where
 
 impl<T, const W: usize, const E: usize> SyscallDriver for BlockStorage<'static, T, W, E>
 where
-    T: hil::block_storage::BlockStorage<W, E>,
+    T: hil::block_storage::Storage<W, E>,
 {
     fn command(
         &self,
@@ -360,42 +347,15 @@ where
         _length: usize,
         appid: ProcessId,
     ) -> CommandReturn {
-        kernel::debug   !("cmd {} of {} len {}", command_num, offset, _length);    
+        kernel::debug!("cmd {} of {} len {}", command_num, offset, _length);
         match Command::try_from(command_num) {
-            Ok(Command::CHECK) => {
-                CommandReturn::success()
-            },
-            Ok(Command::SIZE) => {
-                self.device.get_size()
-                    .map_or_else(CommandReturn::failure, CommandReturn::success_u64)
-            },
-            Ok(Command::GEOMETRY) => {
-                CommandReturn::success_u32_u32(W as u32, E as u32)
-            },
-            Ok(Command::READ_RANGE) => {
-                CommandReturn::failure(ErrorCode::NOSUPPORT)
-            },
-            Ok(Command::READ) => {
-                let region = Region {
-                    index: BlockIndex(offset as u32),
-                    length_blocks: 1,
-                };
-                self.start_read(&region, appid).into()
-            },
-            Ok(Command::ERASE) => {
-                let region = Region {
-                    index: BlockIndex(offset as u32),
-                    length_blocks: 1,
-                };
-                self.start_erase(&region, appid).into()
-            },
-            Ok(Command::WRITE) => {
-                let region = Region {
-                    index: BlockIndex(offset as u32),
-                    length_blocks: 1,
-                };
-                self.start_write(&region, appid).into()
-            }
+            Ok(Command::CHECK) => CommandReturn::success(),
+            Ok(Command::SIZE) => CommandReturn::success_u64(self.device.get_size()),
+            Ok(Command::GEOMETRY) => CommandReturn::success_u32_u32(W as u32, E as u32),
+            Ok(Command::READ_RANGE) => CommandReturn::failure(ErrorCode::NOSUPPORT),
+            Ok(Command::READ) => self.start_read(&BlockIndex(offset as u32), appid).into(),
+            Ok(Command::DISCARD) => self.start_discard(&BlockIndex(offset as u32), appid).into(),
+            Ok(Command::WRITE) => self.start_write(&BlockIndex(offset as u32), appid).into(),
             Err(()) => CommandReturn::failure(ErrorCode::NOSUPPORT),
         }
     }
