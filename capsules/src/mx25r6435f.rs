@@ -51,9 +51,9 @@
 //! ```
 
 use core::cell::Cell;
+use core::ops::{Index, IndexMut};
 use kernel::debug;
 use kernel::hil;
-use kernel::hil::block_storage::AddressRange;
 use kernel::hil::time::ConvertTicks;
 use kernel::utilities::cells::OptionalCell;
 use kernel::utilities::cells::TakeCell;
@@ -63,11 +63,56 @@ pub static mut TXBUFFER: [u8; PAGE_SIZE as usize + 4] = [0; PAGE_SIZE as usize +
 pub static mut RXBUFFER: [u8; PAGE_SIZE as usize + 4] = [0; PAGE_SIZE as usize + 4];
 
 const SPI_SPEED: u32 = 8000000;
-pub const SECTOR_SIZE: usize = 4096;
+const SECTOR_SIZE: u32 = 4096;
 const PAGE_SIZE: u32 = 256;
 
-// TODO: remove alias
-type Mx25r6435fSector = [u8];
+/// This is a wrapper around a u8 array that is sized to a single page for the
+/// MX25R6435F. The page size is 4k because that is the smallest size that can
+/// be erased (even though 256 bytes can be written).
+///
+/// An example looks like:
+///
+/// ```
+/// # use capsules::mx25r6435f::Mx25r6435fSector;
+///
+/// static mut PAGEBUFFER: Mx25r6435fSector = Mx25r6435fSector::new();
+/// ```
+#[derive(Debug)]
+pub struct Mx25r6435fSector(pub [u8; SECTOR_SIZE as usize]);
+
+impl Mx25r6435fSector {
+    pub const fn new() -> Self {
+        Self {
+            0: [0; SECTOR_SIZE as usize],
+        }
+    }
+}
+
+impl Default for Mx25r6435fSector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Index<usize> for Mx25r6435fSector {
+    type Output = u8;
+
+    fn index(&self, idx: usize) -> &u8 {
+        &self.0[idx]
+    }
+}
+
+impl IndexMut<usize> for Mx25r6435fSector {
+    fn index_mut(&mut self, idx: usize) -> &mut u8 {
+        &mut self.0[idx]
+    }
+}
+
+impl AsMut<[u8]> for Mx25r6435fSector {
+    fn as_mut(&mut self) -> &mut [u8] {
+        &mut self.0
+    }
+}
 
 #[allow(dead_code)]
 enum Opcodes {
@@ -81,7 +126,12 @@ enum Opcodes {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-    Write { page_index: u32 },
+enum Operation {
+    Erase,
+    Write { sector_index: u32 },
+}
+
+#[derive(Clone, Copy, PartialEq)]
 enum State {
     Idle,
 
@@ -92,9 +142,14 @@ enum State {
 
     EraseSectorWriteEnable {
         sector_index: u32,
+        operation: Operation,
     },
-    EraseSectorErase,
-    EraseSectorCheckDone,
+    EraseSectorErase {
+        operation: Operation,
+    },
+    EraseSectorCheckDone {
+        operation: Operation,
+    },
     EraseSectorDone,
 
     WriteSectorWriteEnable {
@@ -130,7 +185,7 @@ pub struct MX25R6435F<
     hold_pin: Option<&'a P>,
     txbuffer: TakeCell<'static, [u8]>,
     rxbuffer: TakeCell<'static, [u8]>,
-    client: OptionalCell<&'a dyn hil::block_storage::Client<SECTOR_SIZE, SECTOR_SIZE>>,
+    client: OptionalCell<&'a dyn hil::flash::LegacyClient<MX25R6435F<'a, S, P, A>>>,
     client_sector: TakeCell<'static, Mx25r6435fSector>,
 }
 
@@ -222,6 +277,7 @@ impl<
         self.configure_spi()?;
         self.state.set(State::EraseSectorWriteEnable {
             sector_index,
+            operation: Operation::Erase,
         });
         self.enable_write()
     }
@@ -242,9 +298,9 @@ impl<
                             .map_or(Err(ErrorCode::RESERVE), move |rxbuffer| {
                                 // Setup the read instruction
                                 txbuffer[0] = Opcodes::READ as u8;
-                                txbuffer[1] = ((sector_index * SECTOR_SIZE as u32) >> 16) as u8;
-                                txbuffer[2] = ((sector_index * SECTOR_SIZE as u32) >> 8) as u8;
-                                txbuffer[3] = ((sector_index * SECTOR_SIZE as u32) >> 0) as u8;
+                                txbuffer[1] = ((sector_index * SECTOR_SIZE) >> 16) as u8;
+                                txbuffer[2] = ((sector_index * SECTOR_SIZE) >> 8) as u8;
+                                txbuffer[3] = ((sector_index * SECTOR_SIZE) >> 0) as u8;
 
                                 // Call the SPI driver to kick things off.
                                 self.state.set(State::ReadSector {
@@ -329,6 +385,8 @@ impl<
                 });
             }
             State::ReadSector {
+                sector_index,
+                page_index,
             } => {
                 self.client_sector.take().map(|sector| {
                     read_buffer.map(move |read_buffer| {
@@ -338,18 +396,18 @@ impl<
                             sector[i + (page_index * PAGE_SIZE) as usize] = read_buffer[i + 4];
                         }
 
-                        if (page_index + 1) * PAGE_SIZE == SECTOR_SIZE as u32 {
+                        if (page_index + 1) * PAGE_SIZE == SECTOR_SIZE {
                             // Done reading
                             self.state.set(State::Idle);
                             self.txbuffer.replace(write_buffer);
                             self.rxbuffer.replace(read_buffer);
 
                             self.client.map(move |client| {
-                                client.read_complete(sector, Ok(()));
+                                client.read_complete(sector, hil::flash::Error::CommandComplete);
                             });
                         } else {
                             let address =
-                                (sector_index * SECTOR_SIZE as u32) + ((page_index + 1) * PAGE_SIZE);
+                                (sector_index * SECTOR_SIZE) + ((page_index + 1) * PAGE_SIZE);
                             write_buffer[0] = Opcodes::READ as u8;
                             write_buffer[1] = (address >> 16) as u8;
                             write_buffer[2] = (address >> 8) as u8;
@@ -372,25 +430,26 @@ impl<
             }
             State::EraseSectorWriteEnable {
                 sector_index,
+                operation,
             } => {
-                self.state.set(State::EraseSectorErase);
+                self.state.set(State::EraseSectorErase { operation });
                 write_buffer[0] = Opcodes::SE as u8;
-                write_buffer[1] = ((sector_index * SECTOR_SIZE as u32) >> 16) as u8;
-                write_buffer[2] = ((sector_index * SECTOR_SIZE as u32) >> 8) as u8;
-                write_buffer[3] = ((sector_index * SECTOR_SIZE as u32) >> 0) as u8;
+                write_buffer[1] = ((sector_index * SECTOR_SIZE) >> 16) as u8;
+                write_buffer[2] = ((sector_index * SECTOR_SIZE) >> 8) as u8;
+                write_buffer[3] = ((sector_index * SECTOR_SIZE) >> 0) as u8;
 
                 // TODO verify SPI return value
                 let _ = self.spi.read_write_bytes(write_buffer, None, 4);
             }
-            State::EraseSectorErase => {
-                self.state.set(State::EraseSectorCheckDone);
+            State::EraseSectorErase { operation } => {
+                self.state.set(State::EraseSectorCheckDone { operation });
                 self.txbuffer.replace(write_buffer);
                 // Datasheet says erase takes 58 ms on average. So we wait that
                 // long.
                 let delay = self.alarm.ticks_from_ms(58);
                 self.alarm.set_alarm(self.alarm.now(), delay);
             }
-            State::EraseSectorCheckDone => {
+            State::EraseSectorCheckDone { operation } => {
                 read_buffer.map(move |read_buffer| {
                     let status = read_buffer[1];
 
@@ -420,7 +479,7 @@ impl<
                 self.state.set(State::Idle);
                 self.txbuffer.replace(write_buffer);
                 self.client.map(|client| {
-                    client.erase_complete(Ok(()));
+                    client.erase_complete(hil::flash::Error::CommandComplete);
                 });
             }
             State::WriteSectorWriteEnable {
@@ -429,13 +488,13 @@ impl<
             } => {
                 // Check if we are done. This happens when we have written a
                 // sector's worth of data, one page at a time.
-                if page_index * PAGE_SIZE == SECTOR_SIZE as u32 {
+                if page_index * PAGE_SIZE == SECTOR_SIZE {
                     // No need to disable writes since it happens automatically.
                     self.state.set(State::Idle);
                     self.txbuffer.replace(write_buffer);
                     self.client.map(|client| {
                         self.client_sector.take().map(|sector| {
-                            client.write_complete(sector, Ok(()));
+                            client.write_complete(sector, hil::flash::Error::CommandComplete);
                         });
                     });
                 } else {
@@ -458,7 +517,7 @@ impl<
                     sector_index,
                     page_index: page_index + 1,
                 });
-                let address = (sector_index * SECTOR_SIZE as u32) + (page_index * PAGE_SIZE);
+                let address = (sector_index * SECTOR_SIZE) + (page_index * PAGE_SIZE);
                 write_buffer[0] = Opcodes::PP as u8;
                 write_buffer[1] = (address >> 16) as u8;
                 write_buffer[2] = (address >> 8) as u8;
@@ -538,80 +597,16 @@ impl<
     }
 }
 
- pub type Region = hil::block_storage::Region<SECTOR_SIZE>;
-
 impl<
         'a,
         S: hil::spi::SpiMasterDevice + 'a,
         P: hil::gpio::Pin + 'a,
         A: hil::time::Alarm<'a> + 'a,
-    > hil::block_storage::BlockStorage<SECTOR_SIZE, SECTOR_SIZE> for MX25R6435F<'a, S, P, A>
+        C: hil::flash::LegacyClient<Self>,
+    > hil::flash::HasClient<'a, C> for MX25R6435F<'a, S, P, A>
 {
-    fn read_range(
-        &self,
-        _range: &AddressRange,
-        buf: &'static mut [u8],
-    ) -> Result<(), (ErrorCode, &'static mut [u8])> {
-        Err((ErrorCode::NOSUPPORT, buf))
-    }
-
-    fn read(
-        &self,
-        region: &Region,
-        buf: &'static mut [u8],
-    ) -> Result<(), (ErrorCode, &'static mut [u8])> {
-        let errs = if buf.len() < region.get_length_bytes() as usize {
-            Err(ErrorCode::INVAL)
-        } else if AddressRange::from(*region).get_end_address() > self.get_size().unwrap() {
-            Err(ErrorCode::INVAL)
-        } else if region.length_blocks != 1 {
-            Err(ErrorCode::NOSUPPORT)
-        } else {
-            Ok(())
-        };
-
-        match errs {
-            Ok(()) => self.read_sector(region.index.0, buf),
-            Err(e) => Err((e, buf)),
-        }
-    }
-
-    fn write(
-        &self,
-        region: &Region,
-        buf: &'static mut [u8],
-    ) -> Result<(), (ErrorCode, &'static mut [u8])> {
-        let errs = if buf.len() < region.get_length_bytes() as usize {
-            Err(ErrorCode::INVAL)
-        } else if AddressRange::from(*region).get_end_address() > self.get_size().unwrap() {
-            Err(ErrorCode::INVAL)
-        } else if region.length_blocks != 1 {
-            Err(ErrorCode::NOSUPPORT)
-        } else {
-            Ok(())
-        };
-
-        match errs {
-            Ok(()) => self.write_sector(region.index.0, buf),
-            Err(e) => Err((e, buf)),
-        }
-    }
-
-    fn erase(&self, region: &Region) -> Result<(), ErrorCode> {
-        if AddressRange::from(*region).get_end_address() > self.get_size().unwrap() {
-            Err(ErrorCode::INVAL)
-        } else if region.length_blocks != 1 {
-            Err(ErrorCode::NOSUPPORT)
-        } else {
-            self.erase_sector(region.index.0)
-        }
-    }
-
-    /// Returns the size of the device in bytes.
-    fn get_size(&self) -> Result<u64, ErrorCode> {
-        // TODO: it's probably a good idea to discover the size in advance,
-        // for the sake of compatible devices.
-        Ok(8 * 1024 * 1024)
+    fn set_client(&self, client: &'a C) {
+        self.client.set(client);
     }
 }
 
@@ -620,10 +615,27 @@ impl<
         S: hil::spi::SpiMasterDevice + 'a,
         P: hil::gpio::Pin + 'a,
         A: hil::time::Alarm<'a> + 'a,
-        C: hil::block_storage::Client<SECTOR_SIZE, SECTOR_SIZE>,
-    > hil::block_storage::HasClient<'a, C> for MX25R6435F<'a, S, P, A>
+    > hil::flash::LegacyFlash for MX25R6435F<'a, S, P, A>
 {
-    fn set_client(&self, client: &'a C) {
-        self.client.set(client);
+    type Page = Mx25r6435fSector;
+
+    fn read_page(
+        &self,
+        page_number: usize,
+        buf: &'static mut Self::Page,
+    ) -> Result<(), (ErrorCode, &'static mut Self::Page)> {
+        self.read_sector(page_number as u32, buf)
+    }
+
+    fn write_page(
+        &self,
+        page_number: usize,
+        buf: &'static mut Self::Page,
+    ) -> Result<(), (ErrorCode, &'static mut Self::Page)> {
+        self.write_sector(page_number as u32, buf)
+    }
+
+    fn erase_page(&self, page_number: usize) -> Result<(), ErrorCode> {
+        self.erase_sector(page_number as u32)
     }
 }
