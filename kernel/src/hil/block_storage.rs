@@ -157,8 +157,8 @@ pub trait Storage<const W: usize, const D: usize>:
 {
 }
 
-impl<const W: usize, const D: usize, T: ReadableStorage<W> + WriteableStorage<W, D>> Storage<W, D>
-    for T
+impl<T, const W: usize, const D: usize, > Storage<W, D>
+    for T where T: ReadableStorage<W> + WriteableStorage<W, D>
 {
 }
 
