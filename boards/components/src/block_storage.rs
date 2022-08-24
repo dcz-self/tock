@@ -23,25 +23,22 @@ use kernel::static_init_half;
 /// Setup static space for the objects.
 /// B: the block device type.
 /// W: Write block size.
-/// E: Erase block size.
+/// E: Discard block size.
 #[macro_export]
 macro_rules! block_storage_component_helper {
     ($B:ty, $W:tt, $E: tt $(,)?) => {{
         use capsules::block_storage_driver::BlockStorage;
         use core::mem::MaybeUninit;
         use kernel::hil;
-        static mut BUF1: MaybeUninit<[u8; $W]> = MaybeUninit::uninit();
         static mut BUF2: MaybeUninit<[u8; $W]> = MaybeUninit::uninit();
-        static mut BUF3: MaybeUninit<BlockStorage<'static, $B, $W, $E>>
-            = MaybeUninit::uninit();
-        (&mut BUF1, &mut BUF2, &mut BUF3)
+        static mut BUF3: MaybeUninit<BlockStorage<'static, $B, $W, $E>> = MaybeUninit::uninit();
+        (&mut BUF2, &mut BUF3)
     };};
 }
 
 pub struct BlockStorageComponent<B, const W: usize, const E: usize>
-    where B: 'static
-        + hil::block_storage::BlockStorage<W, E>
-        //+ hil::block_storage::HasClient<'static, >,
+where
+    B: 'static + hil::block_storage::Storage<W, E>,
 {
     pub board_kernel: &'static kernel::Kernel,
     pub driver_num: usize,
@@ -49,15 +46,12 @@ pub struct BlockStorageComponent<B, const W: usize, const E: usize>
 }
 
 impl<B, const W: usize, const E: usize> Component for BlockStorageComponent<B, W, E>
-    where B: 'static
-        + hil::block_storage::BlockStorage<W, E>
-        + hil::block_storage::HasClient<
-            'static,
-            block_storage_driver::BlockStorage<'static, B, W, E>
-        >,
+where
+    B: 'static
+        + hil::block_storage::Storage<W, E>
+        + hil::block_storage::HasClient<'static, block_storage_driver::BlockStorage<'static, B, W, E>>,
 {
     type StaticInput = (
-        &'static mut MaybeUninit<[u8; W]>,
         &'static mut MaybeUninit<[u8; W]>,
         &'static mut MaybeUninit<block_storage_driver::BlockStorage<'static, B, W, E>>,
     );
@@ -66,20 +60,10 @@ impl<B, const W: usize, const E: usize> Component for BlockStorageComponent<B, W
     unsafe fn finalize(self, static_buffer: Self::StaticInput) -> Self::Output {
         let grant_cap = create_capability!(capabilities::MemoryAllocationCapability);
 
-        let read_buffer = static_init_half!(
-            static_buffer.0,
-            [u8; W],
-            [0; W],
-        );
-
-        let write_buffer = static_init_half!(
-            static_buffer.1,
-            [u8; W],
-            [0; W],
-        );
+        let write_buffer = static_init_half!(static_buffer.0, [u8; W], [0; W],);
 
         let syscall_driver = static_init_half!(
-            static_buffer.2,
+            static_buffer.1,
             block_storage_driver::BlockStorage<'static, B, W, E>,
             block_storage_driver::BlockStorage::new(
                 self.device,
@@ -87,7 +71,7 @@ impl<B, const W: usize, const E: usize> Component for BlockStorageComponent<B, W
                 write_buffer,
             )
         );
-        
+
         hil::block_storage::HasClient::set_client(self.device, syscall_driver);
         syscall_driver
     }
