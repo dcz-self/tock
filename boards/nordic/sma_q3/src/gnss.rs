@@ -1,12 +1,9 @@
 /*! Prints out GNSS output. Nothing fancy yet.
  */
-use kernel::debug;
 use kernel::hil;
 use kernel::hil::uart;
 use kernel::ErrorCode;
 use kernel::utilities::cells::TakeCell;
-
-use crate::dbg;
 
 pub const BUFFER_SIZE: usize = 64;
 pub const DRIVER_NUM: usize = 0x90004;

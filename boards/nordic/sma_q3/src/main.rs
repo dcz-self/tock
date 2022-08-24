@@ -10,7 +10,7 @@
 #![deny(missing_docs)]
 
 use capsules::bmp280::Bmp280;
-use capsules::mx25r6435f;
+use capsules::xt25f64b;
 use capsules::virtual_aes_ccm::MuxAES128CCM;
 use capsules::virtual_alarm::VirtualMuxAlarm;
 use components::bmp280_component_helper;
@@ -83,7 +83,7 @@ pub struct Platform {
         nrf52840::ble_radio::Radio<'static>,
         VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>,
     >,
-    block_storage: &'static capsules::block_storage_driver::BlockStorage<
+    /*block_storage: &'static capsules::block_storage_driver::BlockStorage<
         'static,
         mx25r6435f::MX25R6435F<
             'static,
@@ -91,9 +91,9 @@ pub struct Platform {
             nrf52840::gpio::GPIOPin<'static>,
             VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>
         >,
+        256,
         4096,
-        4096,
-    >,
+    >,*/
     ieee802154_radio: &'static capsules::ieee802154::RadioDriver<'static>,
     button: &'static capsules::button::Button<'static, nrf52840::gpio::GPIOPin<'static>>,
     gnss: &'static capsules::console::Console<'static>,
@@ -140,7 +140,7 @@ impl SyscallDriverLookup for Platform {
             capsules::ieee802154::DRIVER_NUM => f(Some(self.ieee802154_radio)),
             capsules::temperature::DRIVER_NUM => f(Some(self.temperature)),
             capsules::analog_comparator::DRIVER_NUM => f(Some(self.analog_comparator)),
-            capsules::block_storage_driver::DRIVER_NUM => f(Some(self.block_storage)),
+//            capsules::block_storage_driver::DRIVER_NUM => f(Some(self.block_storage)),
             gnss::DRIVER_NUM => f(Some(self.gnss)),
             capsules::screen::DRIVER_NUM => f(Some(self.screen)),
             kernel::ipc::DRIVER_NUM => f(Some(&self.ipc)),
@@ -404,7 +404,7 @@ pub unsafe fn main() {
     )
     .finalize(());
     
-    use kernel::hil::block_storage::BlockStorage;
+    use kernel::hil::block_storage::Storage;
 
     let flash = {
         let mux_spi =
@@ -417,14 +417,14 @@ pub unsafe fn main() {
             nrf52840::pinmux::Pinmux::new(Pin::P0_16 as u32),
         );
         
-        components::mx25r6435f::Mx25r6435fComponent::new(
+        components::xt25f64b::Xt25f64bComponent::new(
             None,
             None,
             &nrf52840_peripherals.gpio_port[Pin::P0_14] as &dyn kernel::hil::gpio::Pin,
             mux_alarm,
             mux_spi,
         )
-        .finalize(components::mx25r6435f_component_helper!(
+        .finalize(components::xt25f64b_component_helper!(
             nrf52840::spi::SPIM,
             nrf52840::gpio::GPIOPin,
             nrf52840::rtc::Rtc,
@@ -440,13 +440,13 @@ pub unsafe fn main() {
             device: flash,
         }
         .finalize(components::block_storage_component_helper!(
-            mx25r6435f::MX25R6435F<
+            xt25f64b::XT25F64B<
                 'static,
                 capsules::virtual_spi::VirtualSpiMasterDevice<'static, nrf52840::spi::SPIM>,
                 nrf52840::gpio::GPIOPin<'static>,
                 VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>
             >,
-            4096,
+            256,
             4096,
         ));
 
@@ -631,7 +631,7 @@ pub unsafe fn main() {
         temperature,
         button,
         ble_radio,
-        block_storage: block_storage_driver,
+//        block_storage: block_storage_driver,
         ieee802154_radio,
         gnss,
         pconsole,
@@ -817,7 +817,7 @@ pub unsafe fn main() {
             load_processes(self.board_kernel, self.chip);
             false
         }
-    };
+    }
     
     let periodic = static_init!(
         periodic::Periodic<'static, VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>, Apps>,
