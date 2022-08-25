@@ -215,7 +215,6 @@ impl<
                         .txbuffer
                         .take()
                         .map_or(Err(ErrorCode::RESERVE), |txbuffer| {
-                            debug!("txbuffer there");
                             self.rxbuffer
                                 .take()
                                 .map_or(Err(ErrorCode::RESERVE), move |rxbuffer| {
@@ -225,7 +224,6 @@ impl<
                                     txbuffer[1] = (address >> 16) as u8;
                                     txbuffer[2] = (address >> 8) as u8;
                                     txbuffer[3] = (address >> 0) as u8;
-debug!("state set to read");
                                     // Call the SPI driver to kick things off.
                                     self.state.set(State::ReadSector { page_index });
                                     if let Err((err, txbuffer, rxbuffer)) = self.spi.read_write_bytes(
@@ -245,7 +243,6 @@ debug!("state set to read");
                     match retval {
                         Ok(()) => {
                             self.client_sector.replace(sector);
-                            debug!("state set to read");
                             Ok(())
                         }
                         Err(ecode) => Err((ecode, sector)),
