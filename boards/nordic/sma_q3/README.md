@@ -15,8 +15,15 @@ You'll also need to install [OpenOCD](../../../doc/Getting_Started.md) to prores
 Then, follow the [Tock Getting Started guide](../../../doc/Getting_Started.md)
 
 ## Programming the kernel
+
 Once you have all software installed, you should be able to simply run
 make flash in this directory to install a fresh kernel.
+
+Alternatively:
+
+```
+tockloader flash --address 0 --openocd --board sma_q3 .../tock_build/target/thumbv7em-none-eabi/release/sma_q3.bin
+```
 
 ## Programming user-level applications
 You can program an application via JTAG using `tockloader`:

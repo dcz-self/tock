@@ -76,7 +76,7 @@ enum Opcodes {
     RDSR = 0x05, // Read Status Register
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 enum State {
     Idle,
 
@@ -208,47 +208,52 @@ impl<
         page_index: BlockIndex<PAGE_SIZE>,
         sector: &'static mut [u8],
     ) -> Result<(), (ErrorCode, &'static mut [u8])> {
-        match self.configure_spi() {
-            Ok(()) => {
-                let retval = self
-                    .txbuffer
-                    .take()
-                    .map_or(Err(ErrorCode::RESERVE), |txbuffer| {
-                        self.rxbuffer
-                            .take()
-                            .map_or(Err(ErrorCode::RESERVE), move |rxbuffer| {
-                                let address = AddressRange::from(page_index).start_address as u32;
-                                // Setup the read instruction
-                                txbuffer[0] = Opcodes::READ as u8;
-                                txbuffer[1] = (address >> 16) as u8;
-                                txbuffer[2] = (address >> 8) as u8;
-                                txbuffer[3] = (address >> 0) as u8;
+        match self.state.get() {
+            State::Idle => match self.configure_spi() {
+                Ok(()) => {
+                    let retval = self
+                        .txbuffer
+                        .take()
+                        .map_or(Err(ErrorCode::RESERVE), |txbuffer| {
+                            debug!("txbuffer there");
+                            self.rxbuffer
+                                .take()
+                                .map_or(Err(ErrorCode::RESERVE), move |rxbuffer| {
+                                    let address = AddressRange::from(page_index).start_address as u32;
+                                    // Setup the read instruction
+                                    txbuffer[0] = Opcodes::READ as u8;
+                                    txbuffer[1] = (address >> 16) as u8;
+                                    txbuffer[2] = (address >> 8) as u8;
+                                    txbuffer[3] = (address >> 0) as u8;
+debug!("state set to read");
+                                    // Call the SPI driver to kick things off.
+                                    self.state.set(State::ReadSector { page_index });
+                                    if let Err((err, txbuffer, rxbuffer)) = self.spi.read_write_bytes(
+                                        txbuffer,
+                                        Some(rxbuffer),
+                                        (PAGE_SIZE + 4) as usize,
+                                    ) {
+                                        self.txbuffer.replace(txbuffer);
+                                        self.rxbuffer.replace(rxbuffer.unwrap());
+                                        Err(err)
+                                    } else {
+                                        Ok(())
+                                    }
+                                })
+                        });
 
-                                // Call the SPI driver to kick things off.
-                                self.state.set(State::ReadSector { page_index });
-                                if let Err((err, txbuffer, rxbuffer)) = self.spi.read_write_bytes(
-                                    txbuffer,
-                                    Some(rxbuffer),
-                                    (PAGE_SIZE + 4) as usize,
-                                ) {
-                                    self.txbuffer.replace(txbuffer);
-                                    self.rxbuffer.replace(rxbuffer.unwrap());
-                                    Err(err)
-                                } else {
-                                    Ok(())
-                                }
-                            })
-                    });
-
-                match retval {
-                    Ok(()) => {
-                        self.client_sector.replace(sector);
-                        Ok(())
+                    match retval {
+                        Ok(()) => {
+                            self.client_sector.replace(sector);
+                            debug!("state set to read");
+                            Ok(())
+                        }
+                        Err(ecode) => Err((ecode, sector)),
                     }
-                    Err(ecode) => Err((ecode, sector)),
                 }
-            }
-            Err(error) => Err((error, sector)),
+                Err(error) => Err((error, sector)),
+            },
+            _ => Err((ErrorCode::BUSY, sector)),
         }
     }
 
@@ -412,6 +417,7 @@ impl<
                         // Finished
                         self.state.set(State::Idle);
                         self.txbuffer.replace(write_buffer);
+                        self.rxbuffer.replace(read_buffer);
                         self.client.map(|client| {
                             self.client_sector.take().map(|sector| {
                                 client.write_complete(sector, Ok(()));

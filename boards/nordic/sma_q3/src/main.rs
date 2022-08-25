@@ -829,7 +829,7 @@ pub unsafe fn main() {
     
     
     let _ = platform.pconsole.start();
-    debug!("Initialization complete. Entering main loop\r");
+    debug!("Initialization complete. Entering main loopabc\r");
     debug!("{}", &nrf52840::ficr::FICR_INSTANCE);
 
     // When a process crashes during loading, it usually isn't caught by RTT.

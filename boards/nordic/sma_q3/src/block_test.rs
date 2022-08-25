@@ -21,7 +21,7 @@ impl<'a, F: hil::block_storage::Storage<256, 4096>>
 {
     fn read_complete(&self, buffer: &'static mut [u8], error: Result<(), ErrorCode>) {
         dbg!("Read");
-        dbg!(&buffer.as_mut()[0..16]);
+        dbg!(&buffer.as_mut()[0..5]);
     }
 }
 
@@ -33,7 +33,10 @@ impl<'a, F: hil::block_storage::Storage<256, 4096>>
         let region = hil::block_storage::BlockIndex(43);
         debug!("written");
         buffer[0] = 0;
-        dbg!(self.flash.read(&region, buffer));
+        match self.flash.read(&region, buffer) {
+            Err((e, _)) => {dbg!(e);},
+            _ => {dbg!("read submitted");},
+        }
     }
     fn discard_complete(&self, error: Result<(), ErrorCode>) {
         debug!("erased");

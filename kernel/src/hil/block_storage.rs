@@ -27,7 +27,7 @@ use core::ops::Add;
 
 /// An index to a block within device composed of `S`-sized blocks.
 /// Stores the number of blocks from the start of the device.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct BlockIndex<const S: usize>(pub u32);
 
 impl<const S: usize> BlockIndex<S> {
