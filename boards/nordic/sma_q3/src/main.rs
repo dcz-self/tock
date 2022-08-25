@@ -17,6 +17,7 @@ use components::bmp280_component_helper;
 use components::bmp280::Bmp280Component;
 use kernel::component::Component;
 use kernel::dynamic_deferred_call::{DynamicDeferredCall, DynamicDeferredCallClientState};
+use kernel::hil;
 use kernel::hil::sensors::{TemperatureClient, TemperatureDriver};
 use kernel::hil::i2c::I2CMaster;
 use kernel::hil::led::LedHigh;
@@ -30,6 +31,7 @@ use nrf52840::gpio::Pin;
 use nrf52840::interrupt_service::Nrf52840DefaultPeripherals;
 use nrf52_components::{self, UartChannel};
 
+mod block_test;
 mod gnss;
 mod logo;
 mod periodic;
@@ -404,8 +406,6 @@ pub unsafe fn main() {
     )
     .finalize(());
     
-    use kernel::hil::block_storage::Storage;
-
     let flash = {
         let mux_spi =
         components::spi::SpiMuxComponent::new(&base_peripherals.spim0, dynamic_deferred_caller)
@@ -431,6 +431,34 @@ pub unsafe fn main() {
         ))
     };
     
+    
+    let blocktest = {
+        static mut PAGEBUFFER: [u8; xt25f64b::PAGE_SIZE as usize]
+            = [0; xt25f64b::PAGE_SIZE as usize];
+    
+        kernel::static_init!(
+            block_test::Block<xt25f64b::XT25F64B<
+                'static,
+                VirtualSpiMasterDevice<'static, nrf52840::spi::SPIM>,
+                nrf52840::gpio::GPIOPin<'static>,
+                VirtualMuxAlarm<'static, nrf52840::rtc::Rtc<'static>>,
+            >>,
+            block_test::Block::new(flash, &mut PAGEBUFFER),
+        )
+    };
+    use kernel::hil::block_storage::{HasClient, WriteableStorage};
+    flash.set_client(blocktest);
+    
+    let start_addr
+        = hil::block_storage::AddressRange::from(
+            hil::block_storage::BlockIndex::<256>(43)
+        )
+        .start_address;
+    dbg!(flash.discard(
+        &hil::block_storage::BlockIndex::new_containing(start_addr)
+    ));
+
+    /*
     use kernel::hil::block_storage::HasClient;
 
     let block_storage_driver
@@ -448,7 +476,7 @@ pub unsafe fn main() {
             >,
             256,
             4096,
-        ));
+        ));*/
 
     use capsules::virtual_spi::VirtualSpiMasterDevice;
         
